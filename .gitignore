@@ -1,0 +1,17 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+infra/build/
+
+# Local secrets and outputs
+.local/
+*.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
