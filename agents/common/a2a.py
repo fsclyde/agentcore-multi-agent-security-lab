@@ -17,12 +17,13 @@ import urllib.request
 import uuid
 from typing import Callable
 
-from fastapi import FastAPI, Request
+from fastapi import Body, FastAPI, Request
 
 REGION = os.environ.get("AWS_REGION", "eu-west-1")
 
 
-def server(name: str, description: str, skills: list[dict], handle: Callable[[str], str]) -> FastAPI:
+def server(name: str, description: str, skills: list[dict], handle: Callable[[str, str], str]) -> FastAPI:
+    """handle(text, bearer): bearer is the person's token, already validated by AgentCore."""
     app = FastAPI()
 
     @app.get("/ping")
@@ -45,14 +46,13 @@ def server(name: str, description: str, skills: list[dict], handle: Callable[[st
         }
 
     @app.post("/")
-    async def rpc(request: Request):
-        req = await request.json()
+    def rpc(request: Request, req: dict = Body(...)):
         rid = req.get("id")
         if req.get("method") != "message/send":
             return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": "Method not found"}}
         parts = req["params"]["message"].get("parts", [])
         text = "\n".join(p.get("text", "") for p in parts if p.get("kind") == "text")
-        answer = handle(text)
+        answer = handle(text, request.headers.get("authorization", ""))
         return {
             "jsonrpc": "2.0",
             "id": rid,

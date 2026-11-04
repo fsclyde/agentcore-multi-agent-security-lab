@@ -1,32 +1,41 @@
 # Cedar policies for the gateway. Default deny: a tool call is allowed only if
 # a permit matches and no forbid matches.
 #
-# Principal = the agent's Cognito client (sub of a client-credentials token).
-# Action    = <target>___<tool>
-# Resource  = this gateway
+# principal       = the agent's IAM role (the request is SigV4-signed)
+# action          = <target>___<tool>
+# resource        = this gateway
+# context.input.* = the tool arguments, plus the identity the REQUEST
+#                   interceptor added: _agent, _on_behalf_of, _on_behalf_of_role
+#
+# So each decision covers both the agent and the person it acts for.
 
 resource "aws_bedrockagentcore_policy_engine" "lab" {
   name        = "${local.name}_sre_policies"
-  description = "Which agent may call which Kubernetes tool, and with which inputs"
+  description = "Which agent may call which tool, for whom, and with which inputs"
 }
 
 locals {
-  gw       = "AgentCore::Gateway::\"${aws_bedrockagentcore_gateway.tools.gateway_arn}\""
-  holmes   = "AgentCore::OAuthUser::\"${aws_cognito_user_pool_client.agent["holmes"].id}\""
-  operator = "AgentCore::OAuthUser::\"${aws_cognito_user_pool_client.agent["operator"].id}\""
+  gw = "AgentCore::Gateway::\"${aws_bedrockagentcore_gateway.tools.gateway_arn}\""
+  # IAM principals are matched on the role, without the session name.
+  holmes   = "AgentCore::IamEntity::\"arn:aws:sts::${local.account_id}:assumed-role/${aws_iam_role.agent["holmes"].name}\""
+  operator = "AgentCore::IamEntity::\"arn:aws:sts::${local.account_id}:assumed-role/${aws_iam_role.agent["operator"].name}\""
 
   read_actions = join(", ", [
-    for t in ["list_pods", "get_deployment", "get_events", "get_pod_logs"] :
-    "AgentCore::Action::\"${local.tools.read.target}___${t}\""
+    for t in local.tool_defs.read : "AgentCore::Action::\"${local.tools.read.target}___${t.name}\""
   ])
   write_action = "AgentCore::Action::\"${local.tools.write.target}___update_deployment_image\""
+
+  # The agent name the interceptor wrote must match the signed IAM role, and a
+  # person must be attached. Missing fields fail closed.
+  acting_as_holmes   = "context.input has _agent && context.input._agent == \"holmes\" && context.input has _on_behalf_of_role"
+  acting_as_operator = "context.input has _agent && context.input._agent == \"operator\" && context.input has _on_behalf_of_role"
 }
 
-# HolmesGPT: read tools, namespace demo only.
+# HolmesGPT: read tools, namespace demo only, for a viewer or an admin.
 resource "aws_bedrockagentcore_policy" "holmes_read" {
   name             = "holmes_read_demo"
   policy_engine_id = aws_bedrockagentcore_policy_engine.lab.policy_engine_id
-  description      = "HolmesGPT may read the demo namespace"
+  description      = "HolmesGPT may read the demo namespace for an SRE"
 
   definition {
     cedar {
@@ -36,7 +45,10 @@ resource "aws_bedrockagentcore_policy" "holmes_read" {
           action in [${local.read_actions}],
           resource == ${local.gw}
         )
-        when { context.input.namespace == "demo" };
+        when {
+          ${local.acting_as_holmes} &&
+          context.input.namespace == "demo"
+        };
       EOT
     }
   }
@@ -46,7 +58,7 @@ resource "aws_bedrockagentcore_policy" "holmes_read" {
 resource "aws_bedrockagentcore_policy" "operator_read" {
   name             = "operator_read_demo"
   policy_engine_id = aws_bedrockagentcore_policy_engine.lab.policy_engine_id
-  description      = "The operator may read the demo namespace"
+  description      = "The operator may read the demo namespace for an admin"
 
   definition {
     cedar {
@@ -56,17 +68,21 @@ resource "aws_bedrockagentcore_policy" "operator_read" {
           action in [${local.read_actions}],
           resource == ${local.gw}
         )
-        when { context.input.namespace == "demo" };
+        when {
+          ${local.acting_as_operator} &&
+          context.input._on_behalf_of_role == "sre-admin" &&
+          context.input.namespace == "demo"
+        };
       EOT
     }
   }
 }
 
-# Operator: one write, narrowed by its inputs.
+# Operator: one write, only for an sre-admin, narrowed by its inputs.
 resource "aws_bedrockagentcore_policy" "operator_write" {
   name             = "operator_update_image_demo"
   policy_engine_id = aws_bedrockagentcore_policy_engine.lab.policy_engine_id
-  description      = "The operator may change the image of demo-web to an nginx-unprivileged image"
+  description      = "The operator may change the image of demo-web for an sre-admin"
 
   definition {
     cedar {
@@ -77,6 +93,8 @@ resource "aws_bedrockagentcore_policy" "operator_write" {
           resource == ${local.gw}
         )
         when {
+          ${local.acting_as_operator} &&
+          context.input._on_behalf_of_role == "sre-admin" &&
           context.input.namespace == "demo" &&
           context.input.name == "demo-web" &&
           context.input.image like "nginxinc/nginx-unprivileged:*"

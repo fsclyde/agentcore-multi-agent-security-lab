@@ -14,14 +14,6 @@ output "user_client_id" {
   value = aws_cognito_user_pool_client.user.id
 }
 
-output "agent_client_ids" {
-  value = { for k, c in aws_cognito_user_pool_client.agent : k => c.id }
-}
-
-output "token_endpoint" {
-  value = local.token_endpoint
-}
-
 output "gateway_url" {
   value = aws_bedrockagentcore_gateway.tools.gateway_url
 }
@@ -47,4 +39,8 @@ output "ecr_repositories" {
 
 output "runtime_arns" {
   value = { for k, r in aws_bedrockagentcore_agent_runtime.agent : k => r.agent_runtime_arn }
+}
+
+output "agent_role_arns" {
+  value = { for k, r in aws_iam_role.agent : k => r.arn }
 }

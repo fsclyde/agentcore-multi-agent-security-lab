@@ -49,3 +49,9 @@ variable "block_operator" {
   type        = bool
   default     = false
 }
+
+variable "allow_test_assume" {
+  description = "Let the identity running Terraform assume the agent roles, so scripts/checks.py can test the gateway as each agent. Set to false after testing."
+  type        = bool
+  default     = true
+}

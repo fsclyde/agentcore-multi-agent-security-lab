@@ -3,3 +3,4 @@ mcp==1.16.0
 fastapi==0.115.12
 uvicorn==0.34.2
 boto3==1.40.0
+httpx==0.28.1

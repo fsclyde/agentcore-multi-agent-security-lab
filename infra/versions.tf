@@ -6,18 +6,15 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.50" # 6.50 adds AgentCore policies and the gateway policy_engine_configuration
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.6"
-    }
     archive = {
       source  = "hashicorp/archive"
       version = "~> 2.7"
     }
   }
 
-  # State stays local for the lab (ignored by Git). It contains the Cognito
-  # client secrets, so keep it on your laptop or move it to an S3 backend.
+  # State: copy backend.tf.example to backend.tf to keep it in an encrypted,
+  # versioned S3 bucket (scripts/bootstrap-state.sh creates it). The lab holds
+  # no secrets in state: agents use IAM roles and user passwords stay local.
 }
 
 provider "aws" {

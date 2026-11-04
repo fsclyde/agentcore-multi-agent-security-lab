@@ -1,4 +1,5 @@
-# Three agents on AgentCore Runtime, each with its own execution role.
+# Three agents on AgentCore Runtime, each with its own execution role, inside
+# the VPC (network.tf).
 #
 #   triage    (HTTP)  the entry point. Accepts a person's Cognito token.
 #   holmes    (A2A)   investigates. Accepts the forwarded token of an
@@ -6,8 +7,8 @@
 #   operator  (A2A)   repairs. Accepts the forwarded token of an sre-admin only.
 #
 # The person's group is checked by AgentCore before the request reaches the
-# container, so a viewer cannot reach the operator, whatever the triage agent
-# decides.
+# container. Workers then call the gateway signed with their own role and with
+# the person's token attached, so the gateway sees both.
 
 resource "aws_ecr_repository" "agent" {
   for_each             = toset(["triage", "holmes", "operator"])
@@ -22,21 +23,9 @@ resource "aws_ecr_repository" "agent" {
 
 locals {
   agents = {
-    triage = {
-      protocol = "HTTP"
-      groups   = ["sre-viewer", "sre-admin"]
-      secret   = null
-    }
-    holmes = {
-      protocol = "A2A"
-      groups   = ["sre-viewer", "sre-admin"]
-      secret   = aws_secretsmanager_secret.agent["holmes"].arn
-    }
-    operator = {
-      protocol = "A2A"
-      groups   = ["sre-admin"]
-      secret   = aws_secretsmanager_secret.agent["operator"].arn
-    }
+    triage   = { protocol = "HTTP", groups = ["sre-viewer", "sre-admin"], tools = false }
+    holmes   = { protocol = "A2A", groups = ["sre-viewer", "sre-admin"], tools = true }
+    operator = { protocol = "A2A", groups = ["sre-admin"], tools = true }
   }
 
   common_env = {
@@ -47,10 +36,33 @@ locals {
   }
 }
 
+# The role (not the temporary session) you run Terraform with.
+data "aws_iam_session_context" "current" {
+  arn = data.aws_caller_identity.current.arn
+}
+
+data "aws_iam_policy_document" "agent_assume" {
+  source_policy_documents = [data.aws_iam_policy_document.agentcore_assume.json]
+
+  # Lets scripts/checks.py act as each agent to test the gateway policies.
+  # Set allow_test_assume = false once you have finished testing.
+  dynamic "statement" {
+    for_each = var.allow_test_assume ? [1] : []
+    content {
+      sid     = "LabTester"
+      actions = ["sts:AssumeRole"]
+      principals {
+        type        = "AWS"
+        identifiers = [data.aws_iam_session_context.current.issuer_arn]
+      }
+    }
+  }
+}
+
 resource "aws_iam_role" "agent" {
   for_each           = local.agents
   name               = "${local.name}-agent-${each.key}"
-  assume_role_policy = data.aws_iam_policy_document.agentcore_assume.json
+  assume_role_policy = data.aws_iam_policy_document.agent_assume.json
 }
 
 data "aws_iam_policy_document" "agent" {
@@ -95,18 +107,12 @@ data "aws_iam_policy_document" "agent" {
     resources = [aws_bedrock_guardrail.sre.guardrail_arn]
   }
 
-  statement {
-    sid       = "WorkloadIdentity"
-    actions   = ["bedrock-agentcore:GetWorkloadAccessToken", "bedrock-agentcore:GetWorkloadAccessTokenForJWT"]
-    resources = ["arn:aws:bedrock-agentcore:${var.aws_region}:${local.account_id}:workload-identity-directory/default*"]
-  }
-
   dynamic "statement" {
-    for_each = each.value.secret == null ? [] : [each.value.secret]
+    for_each = each.value.tools ? [1] : []
     content {
-      sid       = "OwnClientSecret"
-      actions   = ["secretsmanager:GetSecretValue"]
-      resources = [statement.value]
+      sid       = "CallToolGateway"
+      actions   = ["bedrock-agentcore:InvokeGateway"]
+      resources = [aws_bedrockagentcore_gateway.tools.gateway_arn]
     }
   }
 }
@@ -132,7 +138,11 @@ resource "aws_bedrockagentcore_agent_runtime" "agent" {
   }
 
   network_configuration {
-    network_mode = "PUBLIC"
+    network_mode = "VPC"
+    network_mode_config {
+      subnets         = module.vpc.private_subnets
+      security_groups = [aws_security_group.agents.id]
+    }
   }
 
   protocol_configuration {
@@ -158,27 +168,21 @@ resource "aws_bedrockagentcore_agent_runtime" "agent" {
     }
   }
 
-  # The triage agent needs the person's token to forward it to the workers.
+  # Each agent reads the person's token to forward it, to a worker or to the gateway.
   request_header_configuration {
     request_header_allowlist = ["Authorization"]
   }
 
   environment_variables = merge(local.common_env, {
-    AGENT_NAME = each.key
-    # Tool access (holmes, operator)
-    GATEWAY_URL      = aws_bedrockagentcore_gateway.tools.gateway_url
-    TOKEN_ENDPOINT   = local.token_endpoint
-    TOKEN_SCOPE      = "${aws_cognito_resource_server.tools.identifier}/invoke"
-    CLIENT_ID        = contains(["holmes", "operator"], each.key) ? aws_cognito_user_pool_client.agent[each.key].id : ""
-    CLIENT_SECRET_ID = each.value.secret == null ? "" : each.value.secret
+    AGENT_NAME  = each.key
+    GATEWAY_URL = each.value.tools ? aws_bedrockagentcore_gateway.tools.gateway_url : ""
   })
 
-  depends_on = [aws_iam_role_policy.agent]
+  depends_on = [aws_iam_role_policy.agent, aws_vpc_endpoint.interface]
 }
 
-# The triage agent learns where the workers are after they exist.
-# Workers are created first; triage gets their ARNs through an SSM parameter
-# read at start-up, which avoids a dependency cycle between runtimes.
+# The triage agent learns where the workers are after they exist, through an
+# SSM parameter read at the first request. That avoids a cycle between runtimes.
 resource "aws_ssm_parameter" "worker_arns" {
   count = var.deploy_agents ? 1 : 0
   name  = "/${local.name}/worker-arns"

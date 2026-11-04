@@ -1,11 +1,12 @@
 """Operator agent: applies one reviewed repair, as an A2A worker.
 
 Only an sre-admin's token reaches this runtime (AgentCore checks the
-cognito:groups claim). Its tool calls use the operator's own Cognito token,
-and the Cedar policy at the gateway only lets it change the image of
-demo-web in the demo namespace.
+cognito:groups claim). Its tool calls are signed with the operator's own IAM
+role and carry the person's token, and the Cedar policy at the gateway only
+lets it change the image of demo-web in the demo namespace, for an sre-admin.
 """
 
+import asyncio
 import os
 
 import uvicorn
@@ -14,7 +15,7 @@ from strands import Agent
 from strands.models import BedrockModel
 from strands.tools.mcp import MCPClient
 
-import agent_token
+import gateway_proxy
 import guard
 from a2a import server
 
@@ -33,14 +34,13 @@ model = BedrockModel(
 )
 
 
-def repair(task: str) -> str:
+def repair(task: str, bearer: str) -> str:
     ok, task = guard.check(task, "INPUT")
     if not ok:
         return task
 
-    tools = MCPClient(lambda: streamablehttp_client(
-        os.environ["GATEWAY_URL"], headers={"Authorization": f"Bearer {agent_token.get()}"}))
-    with tools:
+    tools = MCPClient(lambda: streamablehttp_client("http://127.0.0.1:8100/mcp"))
+    with gateway_proxy.acting_for(bearer), tools:
         agent = Agent(model=model, system_prompt=SYSTEM, tools=tools.list_tools_sync())
         answer = str(agent(task))
 
@@ -57,5 +57,12 @@ app = server(
     handle=repair,
 )
 
+async def main():
+    await asyncio.gather(
+        uvicorn.Server(uvicorn.Config(gateway_proxy.app, host="127.0.0.1", port=8100, log_level="warning")).serve(),
+        uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=9000)).serve(),
+    )
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=9000)
+    asyncio.run(main())

@@ -1,6 +1,13 @@
 # AgentCore Gateway: the only way the agents reach the cluster.
-# Inbound: Cognito tokens from the two agent clients only.
-# Every tools/call is checked by the Cedar policy engine (policies.tf).
+#
+# Every tools/call carries two identities:
+#   - the agent: the request is SigV4-signed with the agent's own IAM role
+#     (authorizer AWS_IAM). Cedar sees it as the principal.
+#   - the person: their Cognito token in the X-On-Behalf-Of header. The
+#     REQUEST interceptor checks it with Cognito and writes the person's name
+#     and role into the tool arguments, where Cedar reads them.
+# The interceptor runs before the Cedar policy engine, and its RESPONSE half
+# applies the guardrail to every tool result (interceptor.tf).
 
 data "aws_iam_policy_document" "agentcore_assume" {
   statement {
@@ -24,9 +31,9 @@ resource "aws_iam_role" "gateway" {
 
 data "aws_iam_policy_document" "gateway" {
   statement {
-    sid       = "InvokeToolLambdas"
+    sid       = "InvokeToolsAndInterceptor"
     actions   = ["lambda:InvokeFunction"]
-    resources = [for f in aws_lambda_function.tool : f.arn]
+    resources = concat([for f in aws_lambda_function.tool : f.arn], [aws_lambda_function.interceptor.arn])
   }
 
   # Needed for the policy engine to authorize tool calls and filter tools/list.
@@ -55,13 +62,17 @@ resource "aws_bedrockagentcore_gateway" "tools" {
   description     = "Kubernetes tools for the SRE agents"
   role_arn        = aws_iam_role.gateway.arn
   protocol_type   = "MCP"
-  authorizer_type = "CUSTOM_JWT"
+  authorizer_type = "AWS_IAM" # agents sign with their own role: no shared secret
 
-  authorizer_configuration {
-    custom_jwt_authorizer {
-      discovery_url   = local.oidc_discovery_url
-      allowed_clients = [for c in aws_cognito_user_pool_client.agent : c.id]
-      allowed_scopes  = ["${aws_cognito_resource_server.tools.identifier}/invoke"]
+  interceptor_configuration {
+    interception_points = ["REQUEST", "RESPONSE"]
+    interceptor {
+      lambda {
+        arn = aws_lambda_function.interceptor.arn
+      }
+    }
+    input_configuration {
+      pass_request_headers = true # the interceptor needs X-On-Behalf-Of and X-Agent-Name
     }
   }
 
@@ -73,89 +84,31 @@ resource "aws_bedrockagentcore_gateway" "tools" {
   depends_on = [aws_iam_role_policy.gateway]
 }
 
-resource "aws_bedrockagentcore_gateway_target" "read" {
-  name               = local.tools.read.target
-  gateway_identifier = aws_bedrockagentcore_gateway.tools.gateway_id
-  description        = "Read-only Kubernetes tools (namespace demo)"
+locals {
+  # Filled in by the interceptor on every tools/call. Whatever an agent puts
+  # there itself is overwritten, so these values can be trusted by Cedar and
+  # by the tool Lambdas.
+  identity_props = ["_agent", "_on_behalf_of", "_on_behalf_of_role"]
 
-  credential_provider_configuration {
-    gateway_iam_role {}
-  }
-
-  target_configuration {
-    mcp {
-      lambda {
-        lambda_arn = aws_lambda_function.tool["read"].arn
-
-        tool_schema {
-          inline_payload {
-            name        = "list_pods"
-            description = "List pods in a namespace with their status and container images."
-            input_schema {
-              type = "object"
-              property {
-                name     = "namespace"
-                type     = "string"
-                required = true
-              }
-            }
-          }
-          inline_payload {
-            name        = "get_deployment"
-            description = "Get a Deployment: replicas, images, annotations and conditions."
-            input_schema {
-              type = "object"
-              property {
-                name     = "namespace"
-                type     = "string"
-                required = true
-              }
-              property {
-                name     = "name"
-                type     = "string"
-                required = true
-              }
-            }
-          }
-          inline_payload {
-            name        = "get_events"
-            description = "List recent events in a namespace."
-            input_schema {
-              type = "object"
-              property {
-                name     = "namespace"
-                type     = "string"
-                required = true
-              }
-            }
-          }
-          inline_payload {
-            name        = "get_pod_logs"
-            description = "Get the last lines of a pod's logs."
-            input_schema {
-              type = "object"
-              property {
-                name     = "namespace"
-                type     = "string"
-                required = true
-              }
-              property {
-                name     = "pod"
-                type     = "string"
-                required = true
-              }
-            }
-          }
-        }
-      }
-    }
+  tool_defs = {
+    read = [
+      { name = "list_pods", description = "List pods in a namespace with their status and container images.", props = ["namespace"] },
+      { name = "get_deployment", description = "Get a Deployment: replicas, images, annotations and conditions.", props = ["namespace", "name"] },
+      { name = "get_events", description = "List recent events in a namespace.", props = ["namespace"] },
+      { name = "get_pod_logs", description = "Get the last lines of a pod's logs.", props = ["namespace", "pod"] },
+    ]
+    write = [
+      { name = "update_deployment_image", description = "Set the image of one container in a Deployment.", props = ["namespace", "name", "container", "image"] },
+    ]
   }
 }
 
-resource "aws_bedrockagentcore_gateway_target" "write" {
-  name               = local.tools.write.target
+resource "aws_bedrockagentcore_gateway_target" "tool" {
+  for_each = local.tools
+
+  name               = each.value.target
   gateway_identifier = aws_bedrockagentcore_gateway.tools.gateway_id
-  description        = "One write tool: change a container image in a Deployment"
+  description        = each.key == "read" ? "Read-only Kubernetes tools (namespace demo)" : "One write tool: change a container image in a Deployment"
 
   credential_provider_configuration {
     gateway_iam_role {}
@@ -164,33 +117,35 @@ resource "aws_bedrockagentcore_gateway_target" "write" {
   target_configuration {
     mcp {
       lambda {
-        lambda_arn = aws_lambda_function.tool["write"].arn
+        lambda_arn = aws_lambda_function.tool[each.key].arn
 
         tool_schema {
-          inline_payload {
-            name        = "update_deployment_image"
-            description = "Set the image of one container in a Deployment."
-            input_schema {
-              type = "object"
-              property {
-                name     = "namespace"
-                type     = "string"
-                required = true
-              }
-              property {
-                name     = "name"
-                type     = "string"
-                required = true
-              }
-              property {
-                name     = "container"
-                type     = "string"
-                required = true
-              }
-              property {
-                name     = "image"
-                type     = "string"
-                required = true
+          dynamic "inline_payload" {
+            for_each = local.tool_defs[each.key]
+            content {
+              name        = inline_payload.value.name
+              description = inline_payload.value.description
+
+              input_schema {
+                type = "object"
+
+                dynamic "property" {
+                  for_each = inline_payload.value.props
+                  content {
+                    name     = property.value
+                    type     = "string"
+                    required = true
+                  }
+                }
+
+                dynamic "property" {
+                  for_each = local.identity_props
+                  content {
+                    name        = property.value
+                    type        = "string"
+                    description = "Set by the gateway. Do not provide."
+                  }
+                }
               }
             }
           }

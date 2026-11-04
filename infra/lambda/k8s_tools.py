@@ -5,8 +5,15 @@ One file, two Lambda functions:
   MODE=WRITE  update_deployment_image
 
 Each function has its own IAM role, mapped by an EKS access entry to its own
-Kubernetes group. RBAC (manifests/rbac.yaml) decides what that group may do,
-so a read function cannot write even if a gateway policy were wrong.
+Kubernetes group. That group can do nothing itself except impersonate:
+  - the read function may act as agent:holmes or agent:operator
+  - the write function may act as agent:operator only
+Every Kubernetes call is made as the agent, with the person attached as the
+on-behalf-of extra. RBAC (manifests/rbac.yaml) is written per agent, and the
+Kubernetes audit log records the agent and the person for every request.
+
+The agent and the person come from _agent and _on_behalf_of, which the
+gateway's REQUEST interceptor writes into the arguments after checking them.
 
 The EKS token is a presigned STS GetCallerIdentity URL (what aws eks get-token
 does). Signing is local, so the function needs no internet access. Only the
@@ -35,6 +42,8 @@ _ssl = ssl.create_default_context(cafile=_ca_file.name)
 
 READ_TOOLS = {"list_pods", "get_deployment", "get_events", "get_pod_logs"}
 WRITE_TOOLS = {"update_deployment_image"}
+AGENTS = {"READ": {"holmes", "operator"}, "WRITE": {"operator"}}
+_identity = {"agent": "", "person": "", "role": ""}
 
 
 def _eks_token() -> str:
@@ -53,7 +62,15 @@ def _k8s(method: str, path: str, body=None, content_type="application/json", raw
         ENDPOINT + path,
         method=method,
         data=json.dumps(body).encode() if body is not None else None,
-        headers={"Authorization": f"Bearer {_eks_token()}", "Content-Type": content_type, "Accept": "application/json"},
+        headers={
+            "Authorization": f"Bearer {_eks_token()}",
+            "Content-Type": content_type,
+            "Accept": "application/json",
+            # Kubernetes impersonation: the request runs as the agent, for the person.
+            "Impersonate-User": f"agent:{_identity['agent']}",
+            "Impersonate-Extra-on-behalf-of": _identity["person"],
+            "Impersonate-Extra-acting-role": _identity["role"],
+        },
     )
     try:
         with urllib.request.urlopen(req, context=_ssl, timeout=15) as resp:
@@ -131,5 +148,11 @@ def handler(event, context):
     if tool not in allowed:
         return {"error": f"{tool} is not available on this target"}
 
-    print(json.dumps({"tool": tool, "input": event}))  # audit line in CloudWatch Logs
-    return TOOLS[tool](**event)
+    args = dict(event)
+    agent, person, role = args.pop("_agent", ""), args.pop("_on_behalf_of", ""), args.pop("_on_behalf_of_role", "")
+    if agent not in AGENTS[MODE] or not person:
+        return {"error": "missing or unexpected identity from the gateway"}
+    _identity.update(agent=agent, person=person, role=role)
+
+    print(json.dumps({"tool": tool, "agent": agent, "on_behalf_of": person, "input": args}))  # audit line
+    return TOOLS[tool](**args)

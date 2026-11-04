@@ -25,7 +25,13 @@ cat infra/policies.tf
 
 Every rule is a file: Cedar policies in `infra/policies.tf`, the guardrail in `infra/guardrail.tf`, Kubernetes RBAC in `manifests/rbac.yaml`.
 
-**Check:** `infra/terraform.tfvars` has your region, IP and model, and `git status` does not list it.
+Keep the Terraform state in an encrypted, versioned S3 bucket:
+
+```bash
+AWS_REGION=eu-west-1 ./scripts/bootstrap-state.sh   # KMS key, bucket, infra/backend.tf
+```
+
+**Check:** `infra/terraform.tfvars` and `infra/backend.tf` exist, and `git status` lists neither.
 
 ## 2. SETUP: build the platform
 
@@ -34,9 +40,9 @@ terraform -chdir=infra init
 terraform -chdir=infra apply      # deploy_agents = false, about 15 minutes (EKS)
 ```
 
-This creates the VPC, EKS, Cognito, the two tool Lambdas, the gateway with its Cedar policy engine in `LOG_ONLY`, the guardrail and the ECR repositories.
+This creates the VPC with its endpoints, EKS, Cognito, the two tool Lambdas, the gateway with its interceptor and its Cedar policy engine in `LOG_ONLY`, the guardrail and the ECR repositories.
 
-**Check:** `terraform -chdir=infra output gateway_url` prints a URL.
+**Check:** `terraform -chdir=infra output gateway_url` prints a URL, and `aws s3 ls s3://acsl-tfstate-$(aws sts get-caller-identity --query Account --output text)/agentcore-lab/` shows the state file.
 
 ## 3. SETUP: demo app and Kubernetes permissions
 
@@ -47,7 +53,15 @@ kubectl apply -f manifests/demo-app.yaml -f manifests/rbac.yaml
 kubectl rollout status deployment/demo-web -n demo
 ```
 
-**Check:** `demo-web` is Running, and `kubectl get rolebinding -n demo` shows `agentcore-read` and `agentcore-write`.
+The tool Lambdas get no permissions of their own: they may only impersonate an agent. The agents get the permissions:
+
+```bash
+kubectl auth can-i patch deployment/demo-web -n demo --as agent:operator   # yes
+kubectl auth can-i patch deployment/demo-web -n demo --as agent:holmes     # no
+kubectl auth can-i get secrets -n demo --as agent:operator                 # no
+```
+
+**Check:** `demo-web` is Running and the three answers are yes, no, no.
 
 ## 4. PROTECT: people
 
@@ -73,7 +87,7 @@ alice is in `sre-viewer`, bob in `sre-admin`. Passwords are generated on your la
 terraform -chdir=infra apply -var deploy_agents=true
 ```
 
-This creates the three AgentCore runtimes, each with its own role, inbound authorizer and environment.
+This creates the three AgentCore runtimes in the VPC, each with its own role, inbound authorizer and environment. Their security group only allows HTTPS to the VPC endpoints.
 
 **Check:** `terraform -chdir=infra output runtime_arns` lists `triage`, `holmes` and `operator`.
 
@@ -83,7 +97,12 @@ This creates the three AgentCore runtimes, each with its own role, inbound autho
 python3 scripts/checks.py
 ```
 
-The policy engine only records its decisions in `LOG_ONLY`. Expect FAIL on the gateway checks: HolmesGPT can read `kube-system` (Kubernetes still refuses it) and can call the write tool (Kubernetes RBAC still refuses it). The delegation checks already pass, because the runtime authorizers are always on.
+The script acts as each agent (it assumes the agent roles) and attaches alice's or bob's token, exactly as the agents do.
+
+The policy engine only records its decisions in `LOG_ONLY`. The interceptor, the tool Lambdas and Kubernetes RBAC are always on, so most calls are already refused one layer further down. Expect two FAIL lines, the cases only Cedar can catch:
+
+- **HolmesGPT claims to be the operator:** without Cedar binding the agent name to the signed role, the write goes through as `agent:operator`.
+- **Operator sets an unapproved image:** Kubernetes allows the operator to patch `demo-web`, but only Cedar checks which image.
 
 **Check:** note which checks fail. This is the "before" picture.
 
@@ -94,7 +113,7 @@ terraform -chdir=infra apply -var deploy_agents=true -var policy_mode=ENFORCE
 python3 scripts/checks.py
 ```
 
-**Check:** all checks pass. HolmesGPT sees only the four read tools in `tools/list`; the operator sees five.
+**Check:** all checks pass, and the e-mail in the `owner` annotation comes back as `{EMAIL}`: the gateway guardrail masked it.
 
 ## 9. The incident
 
@@ -115,26 +134,29 @@ Investigate as alice, ask for the fix as alice, then as bob:
 kubectl rollout status deployment/demo-web -n demo
 ```
 
-**Check:** HolmesGPT names the bad image and changes nothing. alice's repair is refused by the operator runtime. bob's repair changes only the image, and `demo-web` is healthy again.
+**Check:** HolmesGPT names the bad image from the pods and events, and changes nothing. Its `get_deployment` call is blocked by the gateway guardrail because of the hostile annotation, so the instructions never reach the model. alice's repair is refused by the operator runtime. bob's repair changes only the image, and `demo-web` is healthy again.
 
 ## 10. DETECT: follow one action
 
 ```bash
-# What the tools did, with their inputs
+# The gateway: who called, for whom, and what was refused
+aws logs tail /aws/lambda/acsl-gateway-interceptor --since 30m
+# The tools: what ran, as which agent, for whom
 aws logs tail /aws/lambda/acsl-k8s-write --since 30m
-# What Kubernetes saw: the write Lambda's role patching the Deployment
+# Kubernetes: the change, made by agent:operator on behalf of bob
 aws logs filter-log-events --log-group-name "/aws/eks/$(terraform -chdir=infra output -raw cluster_name)/cluster" \
-  --filter-pattern '"acsl-tool-write"' --start-time $(( ($(date +%s) - 1800) * 1000 )) \
-  --query 'events[].message' --output text | jq -r '[.verb, .objectRef.namespace, .objectRef.name, .responseStatus.code] | @tsv'
+  --filter-pattern '"agent:operator"' --start-time $(( ($(date +%s) - 1800) * 1000 )) \
+  --query 'events[].message' --output text \
+  | jq -r 'select(.verb=="patch") | [.impersonatedUser.username, (.impersonatedUser.extra["on-behalf-of"]|join(",")), .verb, .objectRef.name, .responseStatus.code] | @tsv'
 ```
 
 In the CloudWatch console, **GenAI Observability → Bedrock AgentCore** shows each runtime's sessions and traces, and the gateway's policy decisions.
 
-**Check:** you can line up bob's request, the operator's tool call, and the Kubernetes `patch` by time.
+**Check:** the audit line reads `agent:operator  bob  patch  demo-web  200`. The person and the agent are in the record itself, no time matching needed.
 
 ## 11. RESPOND: the operator is compromised
 
-Block every tool call by the operator with one Cedar `forbid`, and sign bob out:
+Block every tool call by the operator with one Cedar `forbid`, and sign bob out. The gateway checks bob's token with Cognito on every call, so his existing tokens stop working at once:
 
 ```bash
 terraform -chdir=infra apply -var deploy_agents=true -var policy_mode=ENFORCE -var block_operator=true
@@ -151,4 +173,10 @@ python3 scripts/checks.py
 # then steps 2 to 8 again
 ```
 
-**Check:** `checks.py` passes on the rebuilt lab with new users and new client secrets. The rebuild time is your recovery time.
+**Check:** `checks.py` passes on the rebuilt lab with new users and new passwords. There are no agent secrets to rotate. The rebuild time is your recovery time.
+
+When you have finished testing, close the test access to the agent roles:
+
+```bash
+terraform -chdir=infra apply -var deploy_agents=true -var policy_mode=ENFORCE -var allow_test_assume=false
+```
