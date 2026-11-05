@@ -1,0 +1,118 @@
+# Kubernetes side of the tool permissions.
+#
+# The two tool Lambdas (groups agentcore-k8s-read / agentcore-k8s-write, from
+# their EKS access entries) can do nothing except impersonate an agent and
+# attach the person. Permissions are given to the agents themselves:
+#   agent:holmes    read pods, logs, events and Deployments in demo
+#   agent:operator  the same reads, plus patch Deployments in demo
+# The audit log then shows, for each request: the Lambda role (user), the
+# agent (impersonatedUser) and the person (extra on-behalf-of).
+
+# ---------------------------------------------------------- impersonation
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agentcore-impersonate-read
+rules:
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+    resourceNames: ["agent:holmes", "agent:operator"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["userextras/on-behalf-of", "userextras/acting-role"]
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agentcore-impersonate-read
+subjects:
+  - kind: Group
+    name: agentcore-k8s-read
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: agentcore-impersonate-read
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agentcore-impersonate-write
+rules:
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+    resourceNames: ["agent:operator"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["userextras/on-behalf-of", "userextras/acting-role"]
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agentcore-impersonate-write
+subjects:
+  - kind: Group
+    name: agentcore-k8s-write
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: agentcore-impersonate-write
+  apiGroup: rbac.authorization.k8s.io
+---
+# ---------------------------------------------------------- agent permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-read
+  namespace: demo
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-read
+  namespace: demo
+subjects:
+  - kind: User
+    name: agent:holmes
+    apiGroup: rbac.authorization.k8s.io
+  - kind: User
+    name: agent:operator
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: agent-read
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-repair
+  namespace: demo
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["demo-web"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-repair
+  namespace: demo
+subjects:
+  - kind: User
+    name: agent:operator
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: agent-repair
+  apiGroup: rbac.authorization.k8s.io

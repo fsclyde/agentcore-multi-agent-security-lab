@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars (ignored by Git) and fill in.
+
+aws_region = "eu-west-1"
+
+# Your public IP: curl -s https://checkip.amazonaws.com
+admin_cidr = "203.0.113.10/32"
+
+# A Bedrock model or inference profile enabled in your account and region.
+model_id = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+# Step 4: false. Step 6 (after the images are pushed): true.
+deploy_agents = false
+
+# Step 6: LOG_ONLY. Step 8: ENFORCE.
+policy_mode = "LOG_ONLY"
