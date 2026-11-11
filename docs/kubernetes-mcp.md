@@ -37,7 +37,7 @@ helm upgrade --install kubernetes-mcp-read \
   --wait --timeout 5m
 ```
 
-The chart is pinned to the upstream `v0.1.2` release. Review the [upstream configuration reference](https://github.com/containers/kubernetes-mcp-server/blob/v0.1.2/docs/configuration.md) before changing toolsets, OAuth behavior, or access control.
+The chart and image are pinned to the upstream `v0.1.2` release. The MCP server has a server-side `enabled_tools` allowlist and `read_only: true`; the matching Holmes `allowed_tools` list limits which tools Holmes can request. Review the [upstream configuration reference](https://github.com/containers/kubernetes-mcp-server/blob/v0.1.2/docs/configuration.md) before changing toolsets, OAuth behavior, or access control.
 
 ## Configure HolmesGPT
 
@@ -49,7 +49,7 @@ The values file disables Holmes' built-in Kubernetes toolsets and restricts the 
 
 Create an AgentCore Gateway target for the Kubernetes MCP server using the supported MCP target setup for your account and network topology. Configure authentication on the Gateway, and apply per-agent policies so only the investigator can call the read tools. Keep the target endpoint private where possible and require TLS. Keep the ServiceAccount's Kubernetes permissions namespace-scoped.
 
-This repository does not yet include AWS Gateway resources or a public endpoint for the MCP server. Those depend on the selected AWS account, region, VPC topology, and authentication provider. Supply those values through infrastructure configuration rather than hard-coding them in this lab.
+This repository does not yet include AWS Gateway resources or endpoint exposure/network connectivity configuration. Those depend on the selected AWS account, region, VPC topology, and authentication provider. Supply those values through infrastructure configuration rather than hard-coding them in this lab.
 
 ## Verify the security boundary
 
