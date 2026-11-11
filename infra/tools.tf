@@ -67,6 +67,9 @@ resource "aws_lambda_function" "tool" {
   source_code_hash = data.archive_file.tools.output_base64sha256
   timeout          = 30
 
+  # One change at a time: limits how fast a misbehaving agent can act.
+  reserved_concurrent_executions = 1
+
   vpc_config {
     subnet_ids         = module.vpc.private_subnets
     security_group_ids = [aws_security_group.tools.id]

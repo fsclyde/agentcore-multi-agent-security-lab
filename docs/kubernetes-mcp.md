@@ -21,7 +21,7 @@ Every layer limits the same thing in a different way:
 | Layer | What it allows |
 | --- | --- |
 | HolmesGPT `allowed_tools` | Six read tools. Agent-side only, a convenience, not a control. |
-| AgentCore Gateway + Cedar | HolmesGPT and the operator, `namespace: demo`, and for `resources_*` only Pod, Deployment, ReplicaSet and Event. Default deny. |
+| AgentCore Gateway + Cedar | HolmesGPT only, `namespace: demo`, and for `resources_*` only Pod, Deployment, ReplicaSet and Event. Default deny. |
 | MCP server | `read_only: true` and `enabled_tools`: six tools, no writes, no exec. |
 | Kubernetes RBAC | ServiceAccount `k8s-mcp-read`: get and list pods, logs, events, Deployments and ReplicaSets in `demo`. Nothing else. |
 | Network | The ALB is internal, only accepts the gateway's Lattice security group, and only forwards `/mcp`. A NetworkPolicy limits the pod's traffic. |
@@ -39,4 +39,4 @@ Installation and checks are in steps 2, 3 and 6 of the [setup guide](setup.md).
 
 ## Why the write stays in a Lambda
 
-The MCP server runs as one ServiceAccount for everyone. For reads, that is acceptable: the gateway logs who asked. For the one change the operator may make, the lab keeps a small Lambda that impersonates `agent:operator` on behalf of the person, so the Kubernetes audit log itself says who changed what, for whom.
+The MCP server runs as one ServiceAccount for everyone. For reads, that is acceptable: only HolmesGPT uses it, and the gateway logs for whom. For the one change the operator may make, the lab keeps a small Lambda that impersonates `agent:operator` on behalf of the person, so the Kubernetes audit log itself says who changed what, for whom.

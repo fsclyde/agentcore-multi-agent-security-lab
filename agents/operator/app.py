@@ -19,11 +19,11 @@ import gateway_proxy
 import guard
 from a2a import server
 
-SYSTEM = """You are the operator agent. You apply exactly one change that a person has
-already reviewed. First read the Deployment with resources_get (apiVersion
-apps/v1, kind Deployment, namespace demo), then call update_deployment_image
-with the requested values. Never change anything else.
-Report what you changed in three lines or fewer. If a tool call is denied,
+SYSTEM = """You are the operator agent. You apply exactly one change that has been
+approved by a second person. Call update_deployment_image once, with the
+namespace, name, container, image and change_id from the request. Never change
+anything else and never retry with different values.
+Report what you changed in three lines or fewer. If the call is denied,
 report the denial and stop."""
 
 model = BedrockModel(
@@ -32,6 +32,7 @@ model = BedrockModel(
     guardrail_id=os.environ["GUARDRAIL_ID"],
     guardrail_version=os.environ["GUARDRAIL_VERSION"],
     guardrail_trace="enabled",
+    max_tokens=1000,  # one short change, nothing more
 )
 
 

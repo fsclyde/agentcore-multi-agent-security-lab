@@ -42,11 +42,12 @@ locals {
   acting_as_operator = "context.input has _agent && context.input._agent == \"operator\" && context.input has _on_behalf_of_role"
 }
 
-# Reads on the MCP server: HolmesGPT and the operator, namespace demo only.
+# Reads on the MCP server: HolmesGPT only, namespace demo only. The operator
+# has no read tools: it only applies an approved change.
 # Created with the MCP target (step 6): Cedar checks each policy against the
 # target's tool schemas.
 resource "aws_bedrockagentcore_policy" "mcp_read" {
-  for_each = var.deploy_agents ? { holmes = local.holmes, operator = local.operator } : {}
+  for_each = var.deploy_agents ? { holmes = local.holmes } : {}
 
   name             = "${each.key}_mcp_read_demo"
   policy_engine_id = aws_bedrockagentcore_policy_engine.lab.policy_engine_id
@@ -69,7 +70,7 @@ resource "aws_bedrockagentcore_policy" "mcp_read" {
 }
 
 resource "aws_bedrockagentcore_policy" "mcp_resources" {
-  for_each = var.deploy_agents ? { holmes = local.holmes, operator = local.operator } : {}
+  for_each = var.deploy_agents ? { holmes = local.holmes } : {}
 
   name             = "${each.key}_mcp_resources_demo"
   policy_engine_id = aws_bedrockagentcore_policy_engine.lab.policy_engine_id
@@ -108,6 +109,7 @@ resource "aws_bedrockagentcore_policy" "operator_write" {
         when {
           ${local.acting_as_operator} &&
           context.input._on_behalf_of_role == "sre-admin" &&
+          context.input has change_id &&
           context.input.namespace == "demo" &&
           context.input.name == "demo-web" &&
           context.input.image like "nginxinc/nginx-unprivileged:*"

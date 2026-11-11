@@ -3,7 +3,8 @@
 # Two users (created by scripts/create-users.sh) in two groups:
 #   sre-viewer  can ask for an investigation
 #   sre-admin   can also ask for a repair
-# Their access token carries a cognito:groups claim.
+# Their access token carries a cognito:groups claim. A third user, carol
+# (sre-admin), approves changes: nobody can approve their own change.
 #
 # Agents do not get Cognito clients or client secrets. Each agent proves who it
 # is with its own IAM role (SigV4) when it calls the gateway, so there is no
@@ -43,8 +44,8 @@ resource "aws_cognito_user_pool_client" "user" {
   user_pool_id                  = aws_cognito_user_pool.lab.id
   generate_secret               = false
   explicit_auth_flows           = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
-  access_token_validity         = 15
-  id_token_validity             = 15
+  access_token_validity         = 5 # the minimum: limits replay of a forwarded token
+  id_token_validity             = 5
   refresh_token_validity        = 1
   prevent_user_existence_errors = "ENABLED"
   enable_token_revocation       = true

@@ -92,7 +92,7 @@ locals {
 
   tool_defs = {
     write = [
-      { name = "update_deployment_image", description = "Set the image of one container in a Deployment.", props = ["namespace", "name", "container", "image"] },
+      { name = "update_deployment_image", description = "Set the image of one container in a Deployment.", props = ["namespace", "name", "container", "image", "change_id"] },
     ]
   }
 }
