@@ -3,7 +3,7 @@
 # Two users (created by scripts/create-users.sh) in two groups:
 #   sre-viewer  can ask for an investigation
 #   sre-admin   can also ask for a repair
-# Their access token carries a cognito:groups claim. A third user, priya
+# Their access token carries a cognito:groups claim. A third user, carol
 # (sre-admin), approves changes: nobody can approve their own change.
 #
 # Agents do not get Cognito clients or client secrets. Each agent proves who it

@@ -2,7 +2,7 @@
 # Four-eyes approval of one change, by a second sre-admin.
 #
 # Usage: ./scripts/approve.sh <approver> <change-id> <requester> <namespace> <deployment> <container> <image>
-# e.g.   ./scripts/approve.sh priya CHG-1001 marco demo demo-web web nginxinc/nginx-unprivileged:1.27-alpine
+# e.g.   ./scripts/approve.sh carol CHG-1001 bob demo demo-web web nginxinc/nginx-unprivileged:1.27-alpine
 #
 # Stores a single-use approval (SecureString, 30 minutes by default) that the gateway
 # interceptor checks before the write tool runs. The approver's own Cognito
