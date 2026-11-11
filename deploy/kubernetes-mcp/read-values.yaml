@@ -1,0 +1,42 @@
+fullnameOverride: kubernetes-mcp-read
+
+serviceAccount:
+  create: true
+  name: k8s-mcp-read
+  automountToken: true
+
+rbac:
+  create: false
+
+ingress:
+  enabled: false
+
+httpRoute:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 8080
+
+image:
+  registry: quay.io
+  repository: containers/kubernetes_mcp_server
+  version: v0.1.2
+  pullPolicy: IfNotPresent
+
+config:
+  port: "8080"
+  bind_address: "0.0.0.0"
+  toolsets:
+    - core
+  read_only: true
+  disabled_tools:
+    - configuration_view
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
