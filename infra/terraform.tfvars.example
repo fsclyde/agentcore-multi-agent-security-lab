@@ -2,7 +2,7 @@
 
 aws_region = "eu-west-1"
 
-# Your public IP: curl -s https://checkip.amazonaws.com
+# Your public IP. ./scripts/configure.sh fills this in.
 admin_cidr = "203.0.113.10/32"
 
 # A Bedrock model or inference profile enabled in your account and region.
@@ -14,6 +14,6 @@ deploy_agents = false
 # Step 6: LOG_ONLY. Step 8: ENFORCE.
 policy_mode = "LOG_ONLY"
 
-# Kubernetes MCP server certificate (DNS validation in your Route 53 zone).
-mcp_hostname = "k8s-mcp.lab.example.com"
-mcp_zone_id  = "Z0123456789ABCDEFGHIJ"
+# A public Route 53 hosted zone in this account, for the Kubernetes MCP
+# server's TLS certificate. ./scripts/configure.sh fills this in.
+mcp_domain = "lab.example.com"

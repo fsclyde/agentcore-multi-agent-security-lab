@@ -56,12 +56,18 @@ variable "allow_test_assume" {
   default     = true
 }
 
-variable "mcp_hostname" {
-  description = "Name on the TLS certificate of the Kubernetes MCP server, in a Route 53 zone you own (for example k8s-mcp.lab.example.com). It does not need to resolve publicly: the gateway reaches the internal ALB through VPC Lattice."
+variable "mcp_domain" {
+  description = "A public Route 53 hosted zone in this account (for example lab.example.com). Terraform finds the zone and puts the Kubernetes MCP server's TLS certificate under it; scripts/configure.sh picks it for you. Nothing is published: the gateway reaches the internal ALB through VPC Lattice."
   type        = string
+
+  validation {
+    condition     = length(trimspace(var.mcp_domain)) > 0
+    error_message = "Set mcp_domain to a public Route 53 hosted zone in this account (run ./scripts/configure.sh)."
+  }
 }
 
-variable "mcp_zone_id" {
-  description = "Route 53 public hosted zone for mcp_hostname, used only for the ACM DNS validation record."
+variable "mcp_hostname" {
+  description = "Optional name on the certificate. Default: acsl-mcp.<mcp_domain>."
   type        = string
+  default     = ""
 }

@@ -17,8 +17,17 @@ locals {
 }
 
 # ------------------------------------------------------------------ TLS
+data "aws_route53_zone" "mcp" {
+  name         = trimsuffix(var.mcp_domain, ".")
+  private_zone = false
+}
+
+locals {
+  mcp_hostname = var.mcp_hostname != "" ? var.mcp_hostname : "acsl-mcp.${trimsuffix(data.aws_route53_zone.mcp.name, ".")}"
+}
+
 resource "aws_acm_certificate" "mcp" {
-  domain_name       = var.mcp_hostname
+  domain_name       = local.mcp_hostname
   validation_method = "DNS"
 
   lifecycle {
@@ -31,7 +40,7 @@ resource "aws_route53_record" "mcp_validation" {
     for o in aws_acm_certificate.mcp.domain_validation_options : o.domain_name => o
   }
 
-  zone_id = var.mcp_zone_id
+  zone_id = data.aws_route53_zone.mcp.zone_id
   name    = each.value.resource_record_name
   type    = each.value.resource_record_type
   records = [each.value.resource_record_value]
@@ -167,7 +176,7 @@ resource "aws_bedrockagentcore_gateway_target" "k8s_mcp" {
   target_configuration {
     mcp {
       mcp_server {
-        endpoint = "https://${var.mcp_hostname}/mcp"
+        endpoint = "https://${local.mcp_hostname}/mcp"
       }
     }
   }
@@ -178,7 +187,7 @@ resource "aws_bedrockagentcore_gateway_target" "k8s_mcp" {
       subnet_ids               = module.vpc.private_subnets
       endpoint_ip_address_type = "IPV4"
       security_group_ids       = [aws_security_group.mcp_lattice.id]
-      routing_domain           = aws_lb.mcp.dns_name # the certificate is for mcp_hostname; traffic goes to the ALB
+      routing_domain           = aws_lb.mcp.dns_name # the certificate is for local.mcp_hostname; traffic goes to the ALB
     }
   }
 

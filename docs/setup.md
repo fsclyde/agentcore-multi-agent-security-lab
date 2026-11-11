@@ -19,9 +19,18 @@ New to the lab? Read the story and the four questions in the [README](../README.
 ```bash
 brew install awscli terraform kubectl jq
 docker buildx version          # Docker Desktop with buildx, for ARM64 images
-python3 -m pip install boto3   # for scripts/checks.py
 aws sts get-caller-identity    # an admin profile on a sandbox account
 ```
+
+Python for `scripts/checks.py`, in a virtual environment (Git ignores `venv/`):
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+python3 -m pip install boto3
+```
+
+Run `source venv/bin/activate` again in any new terminal before steps 7 to 12.
 
 In the Bedrock console, enable access to the model you set in `model_id` (Claude Sonnet by default) in your region.
 
@@ -32,12 +41,11 @@ In the Bedrock console, enable access to the model you set in `model_id` (Claude
 > **What you'll see:** that every rule in this lab is a file in Git. Nothing is set by hand in a console.
 
 ```bash
-cp infra/terraform.tfvars.example infra/terraform.tfvars
-echo "admin_cidr = \"$(curl -s https://checkip.amazonaws.com)/32\"" >> infra/terraform.tfvars
-# set mcp_hostname and mcp_zone_id: a name in a Route 53 zone you own, for the
-# Kubernetes MCP server's TLS certificate (it stays private, see step 3)
+./scripts/configure.sh
 cat infra/policies.tf
 ```
+
+`configure.sh` creates `infra/terraform.tfvars` with your public IP (`admin_cidr`) and a public Route 53 hosted zone from your account (`mcp_domain`). The Kubernetes MCP server's TLS certificate is issued for `acsl-mcp.<mcp_domain>`; Terraform finds the zone and validates the certificate itself. Nothing is published under that name: the gateway reaches the server privately (step 3). If you have several hosted zones, the script lists them and you pick one with `MCP_DOMAIN=lab.example.com ./scripts/configure.sh`.
 
 Every rule is a file: Cedar policies in `infra/policies.tf`, the guardrail in `infra/guardrail.tf`, Kubernetes RBAC in `manifests/rbac.yaml`.
 
