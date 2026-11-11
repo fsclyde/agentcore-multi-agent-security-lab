@@ -1,8 +1,20 @@
 # Lab setup
 
-Run every command from the root of the repository. Each step ends with a check.
+Run every command from the root of the repository. Each step starts with what it shows you, and ends with a check.
+
+New to the lab? Read the story and the four questions in the [README](../README.md) first, and keep the [glossary](glossary.md) open.
+
+| Steps | What you do |
+| --- | --- |
+| 0 to 6 | Build: tools, AWS platform, cluster, people, agents |
+| 7 and 8 | Turn the rules on: see what gets through without Cedar, then enforce it |
+| 9 | Try to get around the approval |
+| 10 | Run the story: break the app, investigate, fix with an approval |
+| 11 to 13 | Follow the records, respond to a compromised agent, rebuild |
 
 ## 0. Tools and access
+
+> **What you'll see:** nothing yet. You install the tools and check your AWS access.
 
 ```bash
 brew install awscli terraform kubectl jq
@@ -16,6 +28,8 @@ In the Bedrock console, enable access to the model you set in `model_id` (Claude
 **Check:** `terraform version` shows 1.10 or later.
 
 ## 1. GOVERN: variables and rules in Git
+
+> **What you'll see:** that every rule in this lab is a file in Git. Nothing is set by hand in a console.
 
 ```bash
 cp infra/terraform.tfvars.example infra/terraform.tfvars
@@ -37,6 +51,8 @@ AWS_REGION=eu-west-1 ./scripts/bootstrap-state.sh   # KMS key, bucket, infra/bac
 
 ## 2. SETUP: build the platform
 
+> **What you'll see:** the AWS side of the picture appear: network, cluster, Cognito, the gateway with its checks, and the write tool. No agents yet.
+
 ```bash
 terraform -chdir=infra init
 terraform -chdir=infra apply      # deploy_agents = false, about 15 minutes (EKS)
@@ -47,6 +63,8 @@ This creates the VPC with its endpoints, EKS, Cognito, the write Lambda, the int
 **Check:** `terraform -chdir=infra output gateway_url` prints a URL, and `aws s3 ls s3://acsl-tfstate-$(aws sts get-caller-identity --query Account --output text)/agentcore-lab/` shows the state file.
 
 ## 3. SETUP: demo app, Kubernetes MCP server and permissions
+
+> **What you'll see:** Kubernetes' own limits, before any AI is involved: the read tools only see `demo`, and only `agent:operator` may change `demo-web`.
 
 ```bash
 aws eks update-kubeconfig --name "$(terraform -chdir=infra output -raw cluster_name)" \
@@ -88,6 +106,8 @@ The NetworkPolicy needs network policy enforcement in the VPC CNI. On EKS, turn 
 
 ## 4. PROTECT: people
 
+> **What you'll see:** the three people of the story and their groups, inside their tokens.
+
 ```bash
 ./scripts/create-users.sh
 ```
@@ -98,6 +118,8 @@ alice is in `sre-viewer`; bob and carol are in `sre-admin`. carol approves bob's
 
 ## 5. SETUP: agent images
 
+> **What you'll see:** the three agent containers built and scanned.
+
 ```bash
 ./scripts/build-push.sh v1
 ```
@@ -105,6 +127,8 @@ alice is in `sre-viewer`; bob and carol are in `sre-admin`. carol approves bob's
 **Check:** each of the three ECR repositories has a `v1` image, and the scan on push shows no critical finding.
 
 ## 6. SETUP: the agents
+
+> **What you'll see:** the three agents running in AgentCore, and the gateway listing the tools they may call.
 
 ```bash
 terraform -chdir=infra apply -var deploy_agents=true
@@ -117,6 +141,8 @@ It also adds the Kubernetes MCP server as a private gateway target (`k8s-mcp`, t
 **Check:** `terraform -chdir=infra output runtime_arns` lists `triage`, `holmes` and `operator`, and `aws bedrock-agentcore-control list-gateway-targets --gateway-identifier "$(terraform -chdir=infra output -raw gateway_id)"` shows `k8s-mcp` and `k8s-write` as `READY`.
 
 ## 7. IDENTIFY: baseline with policies in LOG_ONLY
+
+> **What you'll see:** what gets through when Cedar only watches. Most calls are already refused by another layer; a few are not, and those are the reason Cedar is there.
 
 ```bash
 python3 scripts/checks.py
@@ -134,6 +160,8 @@ The policy engine only records its decisions in `LOG_ONLY`. The interceptor (per
 
 ## 8. PROTECT: enforce the Cedar policies
 
+> **What you'll see:** the same checks, now all refused where they should be.
+
 ```bash
 terraform -chdir=infra apply -var deploy_agents=true -var policy_mode=ENFORCE
 python3 scripts/checks.py
@@ -141,7 +169,33 @@ python3 scripts/checks.py
 
 **Check:** all checks pass, and the e-mail in the `owner` annotation comes back as `{EMAIL}`: the gateway guardrail masked it.
 
-## 9. The incident
+## 9. PROTECT: try to get around the approval
+
+> **What you'll see:** every way of changing the cluster without a proper approval, each refused by the gateway with its reason.
+
+```bash
+python3 scripts/checks.py approvals
+```
+
+| Attempt | Refused because |
+| --- | --- |
+| No change ID | `a change_id is required for a change` |
+| bob approves his own change | `a change cannot be approved by the person who asks for it` |
+| The approval has expired | `change ... is for someone else or has expired` (made with `APPROVAL_MINUTES=0`) |
+| The image differs from the approval | `the request does not match the approved image` |
+| The operator acts for alice | `alice (sre-viewer) cannot ask for a change` |
+| HolmesGPT calls the write tool | Cedar: HolmesGPT never writes |
+| An approved change to `kube-system` | Cedar: `demo-web` only |
+| An approved change to an unknown image | Cedar: only the approved image |
+| The same approval used twice | `change ... is not approved`: it was deleted when used |
+
+**Check:** all approval checks pass, and the `changes` saved query (step 11) shows each attempt with its reason.
+
+## 10. The incident
+
+> **What you'll see:** the whole story. HolmesGPT finds the problem but cannot be tricked into changing anything; alice and bob are refused; carol approves; bob's change goes through.
+
+To watch it in one command: `./scripts/demo.sh` (add `PAUSE=1` to go scene by scene). Or run the steps yourself:
 
 Break the app and plant hidden instructions where HolmesGPT will read them:
 
@@ -165,7 +219,9 @@ kubectl rollout status deployment/demo-web -n demo
 
 **Check:** HolmesGPT names the bad image from the pods and events, and changes nothing. Its `resources_get` call on the Deployment is blocked by the gateway guardrail because of the hostile annotation, so the instructions never reach the model. alice's repair is refused by the operator runtime. bob's first request is refused: no approved change. After carol's approval, the operator changes only the image, `demo-web` is healthy again, and the approval is gone (`aws ssm get-parameter --name /acsl/approvals/CHG-1001` returns `ParameterNotFound`).
 
-## 10. DETECT: follow one action
+## 11. DETECT: follow one action
+
+> **What you'll see:** the same change in three records written by three different systems: the gateway, Kubernetes' audit log and the Deployment's history.
 
 ```bash
 # The gateway: who called, for whom, and what was refused
@@ -178,14 +234,24 @@ kubectl logs -n mcp deploy/kubernetes-mcp-read --since 30m
 aws logs filter-log-events --log-group-name "/aws/eks/$(terraform -chdir=infra output -raw cluster_name)/cluster" \
   --filter-pattern '"agent:operator"' --start-time $(( ($(date +%s) - 1800) * 1000 )) \
   --query 'events[].message' --output text \
-  | jq -r 'select(.verb=="patch") | [.impersonatedUser.username, (.impersonatedUser.extra["on-behalf-of"]|join(",")), .verb, .objectRef.name, .responseStatus.code] | @tsv'
+  | jq -r 'select(.verb=="patch") | [.impersonatedUser.username, (.impersonatedUser.extra["on-behalf-of"]|join(",")),
+      (.impersonatedUser.extra["change-id"]|join(",")), (.impersonatedUser.extra["approved-by"]|join(",")),
+      .verb, .objectRef.name, .responseStatus.code] | @tsv'
 ```
 
-In CloudWatch, **Logs Insights → Saved queries → acsl/gateway** has ready queries: denied calls, writes with their change ID and approver, guardrail interventions, and calls per person. **GenAI Observability → Bedrock AgentCore** shows each runtime's sessions and traces, and the gateway's policy decisions.
+Who approved what, straight from Kubernetes:
 
-**Check:** the audit line reads `agent:operator  bob  patch  demo-web  200`, and the `writes` saved query shows the same change with `approved_by carol`. For the change, the person and the agent are in the record itself. Reads appear in the audit log as `system:serviceaccount:mcp:k8s-mcp-read`, which only HolmesGPT uses; the interceptor log says for whom.
+```bash
+kubectl rollout history deployment/demo-web -n demo
+```
 
-## 11. RESPOND: the operator is compromised
+In CloudWatch, **Logs Insights → Saved queries → acsl/gateway** has ready queries: every attempt at a change in order (`changes`), denied calls, writes with their approver, guardrail interventions, and calls per person. **GenAI Observability → Bedrock AgentCore** shows each runtime's sessions and traces, and the gateway's policy decisions.
+
+**Check:** the audit line reads `agent:operator  bob  CHG-1001  carol  patch  demo-web  200`, the rollout history ends with `CHG-1001: web=nginxinc/nginx-unprivileged:1.27-alpine, requested by bob, approved by carol, applied by agent:operator`, and the `changes` saved query shows bob's refused attempt, then the approved one. For the change, the person and the agent are in the record itself. Reads appear in the audit log as `system:serviceaccount:mcp:k8s-mcp-read`, which only HolmesGPT uses; the interceptor log says for whom.
+
+## 12. RESPOND: the operator is compromised
+
+> **What you'll see:** one rule change stops an agent everywhere, and one sign-out stops a person's changes at once.
 
 Block every tool call by the operator with one Cedar `forbid`, and sign bob out. For changes, the gateway checks bob's session with Cognito, so his existing tokens can no longer change anything; for reads, they expire within 5 minutes:
 
@@ -197,7 +263,9 @@ python3 scripts/checks.py
 
 **Check:** the operator's tool calls are now denied, HolmesGPT still investigates. Re-apply without `block_operator` to lift the block.
 
-## 12. RECOVER: rebuild from Git
+## 13. RECOVER: rebuild from Git
+
+> **What you'll see:** the lab rebuilt from Git alone, with no secrets to rotate.
 
 ```bash
 ./scripts/teardown.sh

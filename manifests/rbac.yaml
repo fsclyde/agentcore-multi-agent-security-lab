@@ -4,7 +4,8 @@
 # do nothing except impersonate agent:operator and attach the person. The
 # permission to change demo-web is given to agent:operator itself, so the
 # audit log shows, for each change: the Lambda role (user), the agent
-# (impersonatedUser) and the person (extra on-behalf-of).
+# (impersonatedUser), the person (extra on-behalf-of), and the change ID and
+# its approver (extras change-id and approved-by).
 #
 # Reads use the Kubernetes MCP server's own ServiceAccount:
 # deploy/kubernetes-mcp/rbac.yaml.
@@ -19,7 +20,7 @@ rules:
     verbs: ["impersonate"]
     resourceNames: ["agent:operator"]
   - apiGroups: ["authentication.k8s.io"]
-    resources: ["userextras/on-behalf-of", "userextras/acting-role"]
+    resources: ["userextras/on-behalf-of", "userextras/acting-role", "userextras/change-id", "userextras/approved-by"]
     verbs: ["impersonate"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

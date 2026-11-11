@@ -12,9 +12,11 @@ Read tools come from the upstream Kubernetes MCP server (target k8s-mcp);
 the write tool is the Lambda (target k8s-write).
 
 Run from the repo root after `terraform apply`:  python3 scripts/checks.py
+Only the approval checks (setup step 9):           python3 scripts/checks.py approvals
 """
 
 import json
+import os
 import subprocess
 import sys
 import urllib.error
@@ -107,48 +109,58 @@ BAD = "evil.example.invalid/miner:latest"  # unresolvable on purpose
 _n = [0]
 
 
-def approved(change, approver="carol", requester="bob"):
+def approved(change, approver="carol", requester="bob", minutes=30):
     """Creates a four-eyes approval for exactly this change and returns the args with its ID."""
     _n[0] += 1
     cid = f"CHK-{int(time.time())}-{_n[0]}"
     subprocess.run(["./scripts/approve.sh", approver, cid, requester, change["namespace"], change["name"],
-                    change["container"], change["image"]], check=True, capture_output=True)
+                    change["container"], change["image"]], check=True, capture_output=True,
+                   env={**os.environ, "APPROVAL_MINUTES": str(minutes)})
     return {**change, "change_id": cid}
 
 
 fix = {"namespace": "demo", "name": "demo-web", "container": "web", "image": GOOD}
+ONLY = set(sys.argv[1:])  # e.g. {"approvals"}
 
-print("Gateway: who is calling")
-check("Unsigned request", f"HTTP {gateway('holmes', 'tools/list', {}, signed=False)[0]}", "HTTP 40")
-check("HolmesGPT without a person", call("holmes", R + "resources_get", read, None), "DENIED")
-check("HolmesGPT with a forged person token", call("holmes", R + "resources_get", read, alice[:-8] + "AAAAAAAA"), "DENIED")
-check("HolmesGPT for alice, reads demo", call("holmes", R + "resources_get", read, alice), "ALLOWED")
-check("HolmesGPT claims to be the operator (approved change)", call("holmes", W, approved(fix), bob, claim_name="operator"), "DENIED")
 
-print("Gateway: what it may read")
-check("HolmesGPT reads kube-system", call("holmes", R + "pods_list_in_namespace", {"namespace": "kube-system"}, alice), "DENIED")
-check("HolmesGPT reads a Secret in demo", call("holmes", R + "resources_get", {**read, "apiVersion": "v1", "kind": "Secret", "name": "any"}, alice), "DENIED")
-check("HolmesGPT reads events without a namespace", call("holmes", R + "events_list", {}, alice), "DENIED")
-check("Operator reads (it has no read tools)", call("operator", R + "resources_get", read, bob), "DENIED")
+def section(name, title):
+    if ONLY and name not in ONLY:
+        return False
+    print(title)
+    return True
 
-print("Gateway: changes need a second sre-admin")
-check("Write without a change ID", call("operator", W, fix, bob), "DENIED")
-check("Write approved by the requester himself", call("operator", W, approved(fix, approver="bob"), bob), "DENIED")
-check("Write that differs from the approval", call("operator", W, {**approved(fix), "image": "nginxinc/nginx-unprivileged:1.26"}, bob), "DENIED")
-check("Operator writes for alice (viewer)", call("operator", W, approved(fix, requester="alice"), alice), "DENIED")
-check("HolmesGPT calls the write tool (approved change)", call("holmes", W, approved(fix), bob), "DENIED")
-check("Operator writes kube-system (approved change)", call("operator", W, approved({**fix, "namespace": "kube-system", "name": "coredns", "container": "coredns"}), bob), "DENIED")
-check("Operator sets an unapproved image (approved change)", call("operator", W, approved({**fix, "image": BAD}), bob), "DENIED")
-reuse = approved(fix)
-call("operator", W, reuse, bob)
-check("The same approval used twice", call("operator", W, reuse, bob), "DENIED")
 
-print("Gateway: guardrail on tool results")
-check("E-mail in an annotation is masked", call("holmes", R + "resources_get", read, alice), "ALLOWED")
-print("      (look for {EMAIL} instead of oncall@example.com in the line above)")
+if section("identity", "Gateway: who is calling"):
+    check("Unsigned request", f"HTTP {gateway('holmes', 'tools/list', {}, signed=False)[0]}", "HTTP 40")
+    check("HolmesGPT without a person", call("holmes", R + "resources_get", read, None), "DENIED")
+    check("HolmesGPT with a forged person token", call("holmes", R + "resources_get", read, alice[:-8] + "AAAAAAAA"), "DENIED")
+    check("HolmesGPT for alice, reads demo", call("holmes", R + "resources_get", read, alice), "ALLOWED")
+    check("HolmesGPT claims to be the operator (approved change)", call("holmes", W, approved(fix), bob, claim_name="operator"), "DENIED")
 
-if RUNTIMES:
-    print("Delegation: the runtime checks the person's group")
+if section("reads", "Gateway: what it may read"):
+    check("HolmesGPT reads kube-system", call("holmes", R + "pods_list_in_namespace", {"namespace": "kube-system"}, alice), "DENIED")
+    check("HolmesGPT reads a Secret in demo", call("holmes", R + "resources_get", {**read, "apiVersion": "v1", "kind": "Secret", "name": "any"}, alice), "DENIED")
+    check("HolmesGPT reads events without a namespace", call("holmes", R + "events_list", {}, alice), "DENIED")
+    check("Operator reads (it has no read tools)", call("operator", R + "resources_get", read, bob), "DENIED")
+
+if section("approvals", "Gateway: changes need a second sre-admin"):
+    check("Write without a change ID", call("operator", W, fix, bob), "DENIED")
+    check("Write approved by the requester himself", call("operator", W, approved(fix, approver="bob"), bob), "DENIED")
+    check("Write with an expired approval", call("operator", W, approved(fix, minutes=0), bob), "DENIED")
+    check("Write that differs from the approval", call("operator", W, {**approved(fix), "image": "nginxinc/nginx-unprivileged:1.26"}, bob), "DENIED")
+    check("Operator writes for alice (viewer)", call("operator", W, approved(fix, requester="alice"), alice), "DENIED")
+    check("HolmesGPT calls the write tool (approved change)", call("holmes", W, approved(fix), bob), "DENIED")
+    check("Operator writes kube-system (approved change)", call("operator", W, approved({**fix, "namespace": "kube-system", "name": "coredns", "container": "coredns"}), bob), "DENIED")
+    check("Operator sets an unapproved image (approved change)", call("operator", W, approved({**fix, "image": BAD}), bob), "DENIED")
+    reuse = approved(fix)
+    call("operator", W, reuse, bob)
+    check("The same approval used twice", call("operator", W, reuse, bob), "DENIED")
+
+if section("guardrail", "Gateway: guardrail on tool results"):
+    check("E-mail in an annotation is masked", call("holmes", R + "resources_get", read, alice), "ALLOWED")
+    print("      (look for {EMAIL} instead of oncall@example.com in the line above)")
+
+if RUNTIMES and section("delegation", "Delegation: the runtime checks the person's group"):
 
     def runtime(arn, token):
         url = f"https://bedrock-agentcore.{REGION}.amazonaws.com/runtimes/{urllib.parse.quote(arn, safe='')}/invocations/"

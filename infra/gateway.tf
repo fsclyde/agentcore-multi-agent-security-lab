@@ -88,7 +88,7 @@ locals {
   # Filled in by the interceptor on every call to the write tool. Whatever an
   # agent puts there itself is overwritten, so these values can be trusted by
   # Cedar and by the write Lambda.
-  identity_props = ["_agent", "_on_behalf_of", "_on_behalf_of_role"]
+  identity_props = ["_agent", "_on_behalf_of", "_on_behalf_of_role", "_approved_by"]
 
   tool_defs = {
     write = [

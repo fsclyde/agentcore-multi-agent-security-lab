@@ -10,8 +10,12 @@ Every Kubernetes call is made as the agent, with the person attached as the
 on-behalf-of extra. RBAC (manifests/rbac.yaml) is written per agent, and the
 Kubernetes audit log records the agent and the person for every request.
 
-The agent and the person come from _agent and _on_behalf_of, which the
-gateway's REQUEST interceptor writes into the arguments after checking them.
+The agent, the person and the approver come from _agent, _on_behalf_of and
+_approved_by, which the gateway's REQUEST interceptor writes into the
+arguments after checking them. A change also records its change ID and
+approver in two places Kubernetes keeps: the audit log (impersonation extras
+change-id and approved-by) and the Deployment's change-cause annotation, which
+`kubectl rollout history` shows.
 
 The EKS token is a presigned STS GetCallerIdentity URL (what aws eks get-token
 does). Signing is local, so the function needs no internet access. Only the
@@ -41,7 +45,7 @@ _ssl = ssl.create_default_context(cafile=_ca_file.name)
 READ_TOOLS = {"list_pods", "get_deployment", "get_events", "get_pod_logs"}
 WRITE_TOOLS = {"update_deployment_image"}
 AGENTS = {"READ": {"holmes", "operator"}, "WRITE": {"operator"}}
-_identity = {"agent": "", "person": "", "role": ""}
+_identity = {"agent": "", "person": "", "role": "", "change": "", "approver": ""}
 
 
 def _eks_token() -> str:
@@ -68,6 +72,8 @@ def _k8s(method: str, path: str, body=None, content_type="application/json", raw
             "Impersonate-User": f"agent:{_identity['agent']}",
             "Impersonate-Extra-on-behalf-of": _identity["person"],
             "Impersonate-Extra-acting-role": _identity["role"],
+            **({"Impersonate-Extra-change-id": _identity["change"],
+                "Impersonate-Extra-approved-by": _identity["approver"]} if _identity["change"] else {}),
         },
     )
     try:
@@ -125,13 +131,19 @@ def get_pod_logs(namespace, pod):
     return out if isinstance(out, dict) else {"logs": out}
 
 
-def update_deployment_image(namespace, name, container, image):
-    patch = {"spec": {"template": {"spec": {"containers": [{"name": container, "image": image}]}}}}
+def update_deployment_image(namespace, name, container, image, change_id):
+    cause = (f"{change_id}: {container}={image}, requested by {_identity['person']}, "
+             f"approved by {_identity['approver']}, applied by agent:{_identity['agent']}")
+    patch = {
+        "metadata": {"annotations": {"kubernetes.io/change-cause": cause}},
+        "spec": {"template": {"spec": {"containers": [{"name": container, "image": image}]}}},
+    }
     d = _k8s("PATCH", f"/apis/apps/v1/namespaces/{namespace}/deployments/{name}", patch,
              content_type="application/strategic-merge-patch+json")
     if "error" in d:
         return d
-    return {"updated": name, "container": container, "image": image}
+    return {"updated": name, "container": container, "image": image, "change_id": change_id,
+            "approved_by": _identity["approver"]}
 
 
 TOOLS = {f.__name__: f for f in (list_pods, get_deployment, get_events, get_pod_logs, update_deployment_image)}
@@ -148,9 +160,13 @@ def handler(event, context):
 
     args = dict(event)
     agent, person, role = args.pop("_agent", ""), args.pop("_on_behalf_of", ""), args.pop("_on_behalf_of_role", "")
+    approver = args.pop("_approved_by", "")
     if agent not in AGENTS[MODE] or not person:
         return {"error": "missing or unexpected identity from the gateway"}
-    _identity.update(agent=agent, person=person, role=role)
+    if MODE == "WRITE" and not (approver and args.get("change_id")):
+        return {"error": "a change needs a change ID and an approver from the gateway"}
+    _identity.update(agent=agent, person=person, role=role, change=str(args.get("change_id", "")), approver=approver)
 
-    print(json.dumps({"tool": tool, "agent": agent, "on_behalf_of": person, "input": args}))  # audit line
+    print(json.dumps({"tool": tool, "agent": agent, "on_behalf_of": person, "approved_by": approver,
+                      "input": args}))  # audit line
     return TOOLS[tool](**args)

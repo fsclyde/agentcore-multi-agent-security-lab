@@ -3,13 +3,13 @@
 ## In place
 
 - **Agent and person on every tool call.** The agent signs with its own IAM role; the person's Cognito token travels with the call and is validated at the gateway (signature, issuer, expiry, client). Cedar decides on the agent and the inputs, and on the person for changes.
-- **Four-eyes changes.** A change needs an approval for exactly that change, by another `sre-admin`, single use, valid 30 minutes (`scripts/approve.sh`). The session of the person asking is checked live with Cognito, so a sign-out stops changes at once.
+- **Four-eyes changes.** A change needs an approval for exactly that change, by another `sre-admin`, single use, valid 30 minutes at most (`scripts/approve.sh`). Kubernetes records the change ID and the approver in its audit log and in the rollout history. The session of the person asking is checked live with Cognito, so a sign-out stops changes at once.
 - **Guardrails enforced outside the agents** on every tool result, at the gateway.
 - **Least privilege per agent.** HolmesGPT reads through the Kubernetes MCP server (read-only, `demo` only, no Secrets); the operator has one write tool and no reads. The write runs as `agent:operator` on behalf of the person, so the audit log names both.
 - **Short-lived credentials only.** No agent secrets; people's tokens last 5 minutes.
 - **Private network path.** Runtimes in the VPC, VPC endpoints, VPC Lattice to an internal load balancer.
 - **Limits.** The write tool runs one change at a time; model answers are capped in tokens.
-- **Saved queries** for denials, writes with their approver, guardrail interventions and calls per person.
+- **Saved queries** for every attempt at a change in order, denials, writes with their approver, guardrail interventions and calls per person.
 
 ## To confirm in the first full run
 

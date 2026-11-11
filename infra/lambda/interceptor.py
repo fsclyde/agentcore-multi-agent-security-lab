@@ -14,8 +14,9 @@ REQUEST, before the Cedar policy engine:
        - an approved change (four eyes): an approval record for this exact
          change, by another sre-admin, not expired and not used before.
          The record is deleted when it is used.
-  5. For the write tool only, _agent, _on_behalf_of and _on_behalf_of_role
-     are written into the arguments, overwriting anything the agent sent.
+  5. For the write tool only, _agent, _on_behalf_of, _on_behalf_of_role and
+     _approved_by are written into the arguments, overwriting anything the
+     agent sent.
      Cedar reads them as context.input.*, and the write Lambda uses them for
      Kubernetes impersonation. Calls to the Kubernetes MCP server are left
      unchanged; the person is still checked here and logged with every call.
@@ -25,8 +26,8 @@ RESPONSE, before the agent sees the result:
      untrusted input: prompt attacks and AWS keys are blocked, tokens,
      passwords and e-mails are masked.
 
-Every decision is one JSON log line; CloudWatch metric filters count denials,
-guardrail interventions and writes (infra/interceptor.tf).
+Every decision is one JSON log line, with the change ID for changes. Saved
+Logs Insights queries read them (infra/interceptor.tf).
 """
 
 import base64
@@ -44,6 +45,7 @@ USER_POOL_ID = os.environ["USER_POOL_ID"]
 USER_CLIENT_ID = os.environ["USER_CLIENT_ID"]
 WRITE_TARGET = os.environ["WRITE_TARGET"]
 APPROVAL_PREFIX = os.environ["APPROVAL_PREFIX"]  # e.g. /acsl/approvals/
+MAX_APPROVAL_SECONDS = 1800  # an approval is valid 30 minutes at most
 GUARDRAIL = {"guardrailIdentifier": os.environ["GUARDRAIL_ID"], "guardrailVersion": os.environ["GUARDRAIL_VERSION"]}
 KNOWN_AGENTS = {"holmes", "operator"}
 ISSUER = f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}"
@@ -133,6 +135,8 @@ def _check_approval(args: dict, requester: str):
         raise ValueError("a change cannot be approved by the person who asks for it")
     if not (approver["iat"] - 60 <= record["approved_at"] <= approver["exp"] + 60):
         raise ValueError("the approval was not made with the approver's session")
+    if record["expires"] - record["approved_at"] > MAX_APPROVAL_SECONDS:
+        raise ValueError(f"change {change_id}: approvals are valid {MAX_APPROVAL_SECONDS // 60} minutes at most")
     if record["requested_by"] != requester or record["expires"] < time.time():
         raise ValueError(f"change {change_id} is for someone else or has expired")
     for field in ("namespace", "name", "container", "image"):
@@ -184,6 +188,7 @@ def on_request(mcp):
 
     if is_write:
         args = dict(body["params"].get("arguments") or {})
+        log["change_id"] = str(args.get("change_id", ""))
         try:
             cognito.get_user(AccessToken=token)  # session still live (global sign-out takes effect at once)
         except cognito.exceptions.NotAuthorizedException:
@@ -192,7 +197,7 @@ def on_request(mcp):
             change_id, approver = _check_approval(args, username)
         except (ValueError, KeyError) as err:
             return _deny(body, str(err), **log)
-        args.update(_agent=agent, _on_behalf_of=username, _on_behalf_of_role=role)
+        args.update(_agent=agent, _on_behalf_of=username, _on_behalf_of_role=role, _approved_by=approver)
         body["params"]["arguments"] = args
         log.update(change_id=change_id, approved_by=approver)
 

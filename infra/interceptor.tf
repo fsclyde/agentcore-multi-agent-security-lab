@@ -92,6 +92,8 @@ resource "aws_cloudwatch_query_definition" "interceptor" {
     writes = "fields @timestamp, tool, agent, on_behalf_of, change_id, approved_by | filter decision = \"PASS\" and write = 1 | sort @timestamp desc"
     guardrail = "fields @timestamp, tool, blocked | filter guardrail = \"INTERVENED\" | sort @timestamp desc"
     by_person = "filter ispresent(on_behalf_of) | stats count(*) as calls by on_behalf_of, agent, decision"
+    # Every attempt at a change, refused or applied, in order: one line per try.
+    changes = "fields @timestamp, change_id, decision, on_behalf_of, approved_by, reason | filter ispresent(change_id) | sort @timestamp asc"
   }
 
   name            = "${local.name}/gateway/${each.key}"
