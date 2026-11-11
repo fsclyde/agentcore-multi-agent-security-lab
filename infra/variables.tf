@@ -55,3 +55,13 @@ variable "allow_test_assume" {
   type        = bool
   default     = true
 }
+
+variable "mcp_hostname" {
+  description = "Name on the TLS certificate of the Kubernetes MCP server, in a Route 53 zone you own (for example k8s-mcp.lab.example.com). It does not need to resolve publicly: the gateway reaches the internal ALB through VPC Lattice."
+  type        = string
+}
+
+variable "mcp_zone_id" {
+  description = "Route 53 public hosted zone for mcp_hostname, used only for the ACM DNS validation record."
+  type        = string
+}

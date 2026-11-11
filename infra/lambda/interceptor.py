@@ -5,11 +5,14 @@ REQUEST, before the Cedar policy engine:
   2. The person's Cognito access token must be in X-On-Behalf-Of. Cognito
      itself checks it (GetUser): signature, expiry and sign-out. It must come
      from the people's CLI client.
-  3. A write tool is refused unless the person is in sre-admin.
-  4. _agent, _on_behalf_of and _on_behalf_of_role are written into the tool
-     arguments, overwriting anything the agent sent. Cedar reads them as
-     context.input.*, and the tool Lambdas use them for Kubernetes
-     impersonation.
+  3. The operator only acts for an sre-admin, and the write tool is refused
+     unless the person is in sre-admin.
+  4. For the write tool only, _agent, _on_behalf_of and _on_behalf_of_role
+     are written into the arguments, overwriting anything the agent sent.
+     Cedar reads them as context.input.*, and the write Lambda uses them for
+     Kubernetes impersonation. Calls to the upstream Kubernetes MCP server
+     are left unchanged, because its tool schemas do not have these fields;
+     the person is still checked here, and logged with every call.
 
 RESPONSE, before the agent sees the result:
   5. The text of every tool result goes through the Bedrock guardrail, as
@@ -90,12 +93,14 @@ def on_request(mcp):
         return _deny(body, f"{username} is not in an SRE group")
 
     tool = body["params"]["name"]
-    if tool.startswith(f"{WRITE_TARGET}___") and role != "sre-admin":
+    is_write = tool.startswith(f"{WRITE_TARGET}___")
+    if (is_write or agent == "operator") and role != "sre-admin":
         return _deny(body, f"{username} ({role}) cannot ask for a change")
 
-    args = dict(body["params"].get("arguments") or {})
-    args.update(_agent=agent, _on_behalf_of=username, _on_behalf_of_role=role)
-    body["params"]["arguments"] = args
+    if is_write:
+        args = dict(body["params"].get("arguments") or {})
+        args.update(_agent=agent, _on_behalf_of=username, _on_behalf_of_role=role)
+        body["params"]["arguments"] = args
     print(json.dumps({"decision": "PASS", "tool": tool, "agent": agent, "on_behalf_of": username, "role": role}))
     return _out(request_body=body)
 

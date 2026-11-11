@@ -85,18 +85,12 @@ resource "aws_bedrockagentcore_gateway" "tools" {
 }
 
 locals {
-  # Filled in by the interceptor on every tools/call. Whatever an agent puts
-  # there itself is overwritten, so these values can be trusted by Cedar and
-  # by the tool Lambdas.
+  # Filled in by the interceptor on every call to the write tool. Whatever an
+  # agent puts there itself is overwritten, so these values can be trusted by
+  # Cedar and by the write Lambda.
   identity_props = ["_agent", "_on_behalf_of", "_on_behalf_of_role"]
 
   tool_defs = {
-    read = [
-      { name = "list_pods", description = "List pods in a namespace with their status and container images.", props = ["namespace"] },
-      { name = "get_deployment", description = "Get a Deployment: replicas, images, annotations and conditions.", props = ["namespace", "name"] },
-      { name = "get_events", description = "List recent events in a namespace.", props = ["namespace"] },
-      { name = "get_pod_logs", description = "Get the last lines of a pod's logs.", props = ["namespace", "pod"] },
-    ]
     write = [
       { name = "update_deployment_image", description = "Set the image of one container in a Deployment.", props = ["namespace", "name", "container", "image"] },
     ]
@@ -108,7 +102,7 @@ resource "aws_bedrockagentcore_gateway_target" "tool" {
 
   name               = each.value.target
   gateway_identifier = aws_bedrockagentcore_gateway.tools.gateway_id
-  description        = each.key == "read" ? "Read-only Kubernetes tools (namespace demo)" : "One write tool: change a container image in a Deployment"
+  description        = "One write tool: change a container image in a Deployment"
 
   credential_provider_configuration {
     gateway_iam_role {}

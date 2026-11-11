@@ -5,6 +5,9 @@ Gateway checks act as each agent: the script assumes the agent's IAM role
 (allow_test_assume = true) and signs MCP requests with it, attaching alice's
 (sre-viewer) or bob's (sre-admin) token, exactly as the agents do.
 
+Read tools come from the upstream Kubernetes MCP server (target k8s-mcp);
+the write tool is the Lambda (target k8s-write).
+
 Run from the repo root after `terraform apply`:  python3 scripts/checks.py
 """
 
@@ -93,25 +96,28 @@ def check(label, got, expect):
 
 
 alice, bob = person("alice"), person("bob")
-R, W = "k8s-read___", "k8s-write___update_deployment_image"
-read = {"namespace": "demo", "name": "demo-web"}
+R, W = "k8s-mcp___", "k8s-write___update_deployment_image"
+read = {"apiVersion": "apps/v1", "kind": "Deployment", "namespace": "demo", "name": "demo-web"}
 fix = {"namespace": "demo", "name": "demo-web", "container": "web", "image": "nginxinc/nginx-unprivileged:1.27-alpine"}
 
 print("Gateway: who is calling")
 check("Unsigned request", f"HTTP {gateway('holmes', 'tools/list', {}, signed=False)[0]}", "HTTP 40")
-check("HolmesGPT without a person", call("holmes", R + "get_deployment", read, None), "DENIED")
-check("HolmesGPT for alice, reads demo", call("holmes", R + "get_deployment", read, alice), "ALLOWED")
+check("HolmesGPT without a person", call("holmes", R + "resources_get", read, None), "DENIED")
+check("HolmesGPT for alice, reads demo", call("holmes", R + "resources_get", read, alice), "ALLOWED")
 check("HolmesGPT claims to be the operator", call("holmes", W, fix, bob, claim_name="operator"), "DENIED")
 
 print("Gateway: what it may do")
-check("HolmesGPT reads kube-system", call("holmes", R + "list_pods", {"namespace": "kube-system"}, alice), "DENIED")
+check("HolmesGPT reads kube-system", call("holmes", R + "pods_list_in_namespace", {"namespace": "kube-system"}, alice), "DENIED")
+check("HolmesGPT reads a Secret in demo", call("holmes", R + "resources_get", {**read, "apiVersion": "v1", "kind": "Secret", "name": "any"}, alice), "DENIED")
+check("HolmesGPT reads events without a namespace", call("holmes", R + "events_list", {}, alice), "DENIED")
+check("Operator reads for alice (viewer)", call("operator", R + "resources_get", read, alice), "DENIED")
 check("HolmesGPT calls the write tool for bob", call("holmes", W, fix, bob), "DENIED")
 check("Operator writes for alice (viewer)", call("operator", W, fix, alice), "DENIED")
 check("Operator writes kube-system for bob", call("operator", W, {**fix, "namespace": "kube-system", "name": "coredns", "container": "coredns"}, bob), "DENIED")
 check("Operator sets an unapproved image for bob", call("operator", W, {**fix, "image": "evil/miner:latest"}, bob), "DENIED")
 
 print("Gateway: guardrail on tool results")
-check("E-mail in an annotation is masked", call("holmes", R + "get_deployment", read, alice), "ALLOWED")
+check("E-mail in an annotation is masked", call("holmes", R + "resources_get", read, alice), "ALLOWED")
 print("      (look for {EMAIL} instead of oncall@example.com in the line above)")
 
 if RUNTIMES:

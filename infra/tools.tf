@@ -1,14 +1,10 @@
-# Two tool Lambdas behind the gateway. Same code, different IAM role and
-# different Kubernetes group, so the read tools cannot write even if a policy
-# above them is wrong.
+# The write tool behind the gateway: one Lambda that changes a container image.
+# Reads go through the upstream Kubernetes MCP server (k8s_mcp.tf). Keeping
+# the only write in a Lambda lets it impersonate agent:operator on behalf of
+# the person, so every change is attributed in the Kubernetes audit log.
 
 locals {
   tools = {
-    read = {
-      target    = "k8s-read"
-      k8s_group = "agentcore-k8s-read"
-      mode      = "READ"
-    }
     write = {
       target    = "k8s-write"
       k8s_group = "agentcore-k8s-write"

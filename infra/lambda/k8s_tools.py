@@ -1,13 +1,11 @@
 """Kubernetes tools behind the AgentCore gateway.
 
-One file, two Lambda functions:
-  MODE=READ   list_pods, get_deployment, get_events, get_pod_logs
-  MODE=WRITE  update_deployment_image
+One Lambda function, MODE=WRITE: update_deployment_image. Reads go through the
+upstream Kubernetes MCP server; the read functions below stay so the file can
+also run as a read Lambda (MODE=READ) if you prefer that to the MCP server.
 
-Each function has its own IAM role, mapped by an EKS access entry to its own
-Kubernetes group. That group can do nothing itself except impersonate:
-  - the read function may act as agent:holmes or agent:operator
-  - the write function may act as agent:operator only
+The function's IAM role is mapped by an EKS access entry to its own Kubernetes
+group. That group can do nothing itself except impersonate agent:operator.
 Every Kubernetes call is made as the agent, with the person attached as the
 on-behalf-of extra. RBAC (manifests/rbac.yaml) is written per agent, and the
 Kubernetes audit log records the agent and the person for every request.

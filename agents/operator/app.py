@@ -20,8 +20,9 @@ import guard
 from a2a import server
 
 SYSTEM = """You are the operator agent. You apply exactly one change that a person has
-already reviewed. First read the Deployment with get_deployment, then call
-update_deployment_image with the requested values. Never change anything else.
+already reviewed. First read the Deployment with resources_get (apiVersion
+apps/v1, kind Deployment, namespace demo), then call update_deployment_image
+with the requested values. Never change anything else.
 Report what you changed in three lines or fewer. If a tool call is denied,
 report the denial and stop."""
 

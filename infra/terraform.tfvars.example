@@ -13,3 +13,7 @@ deploy_agents = false
 
 # Step 6: LOG_ONLY. Step 8: ENFORCE.
 policy_mode = "LOG_ONLY"
+
+# Kubernetes MCP server certificate (DNS validation in your Route 53 zone).
+mcp_hostname = "k8s-mcp.lab.example.com"
+mcp_zone_id  = "Z0123456789ABCDEFGHIJ"
