@@ -1,0 +1,62 @@
+# Kubernetes side of the write tool.
+#
+# The write Lambda (group agentcore-k8s-write, from its EKS access entry) can
+# do nothing except impersonate agent:operator and attach the person. The
+# permission to change demo-web is given to agent:operator itself, so the
+# audit log shows, for each change: the Lambda role (user), the agent
+# (impersonatedUser), the person (extra on-behalf-of), and the change ID and
+# its approver (extras change-id and approved-by).
+#
+# Reads use the Kubernetes MCP server's own ServiceAccount:
+# deploy/kubernetes-mcp/rbac.yaml.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agentcore-impersonate-write
+rules:
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+    resourceNames: ["agent:operator"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["userextras/on-behalf-of", "userextras/acting-role", "userextras/change-id", "userextras/approved-by"]
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agentcore-impersonate-write
+subjects:
+  - kind: Group
+    name: agentcore-k8s-write
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: agentcore-impersonate-write
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-repair
+  namespace: demo
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["demo-web"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-repair
+  namespace: demo
+subjects:
+  - kind: User
+    name: agent:operator
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: agent-repair
+  apiGroup: rbac.authorization.k8s.io

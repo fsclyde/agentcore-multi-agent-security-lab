@@ -1,0 +1,12 @@
+# Copy to backend.tf after running scripts/bootstrap-state.sh, then:
+#   terraform -chdir=infra init -migrate-state
+terraform {
+  backend "s3" {
+    bucket       = "acsl-tfstate-<ACCOUNT_ID>"
+    key          = "agentcore-lab/terraform.tfstate"
+    region       = "eu-west-1"
+    encrypt      = true
+    kms_key_id   = "alias/acsl-tfstate"
+    use_lockfile = true # S3-native locking, no DynamoDB table
+  }
+}

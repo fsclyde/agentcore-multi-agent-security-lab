@@ -1,0 +1,32 @@
+# HolmesGPT gets one way to see the cluster: the AgentCore gateway, through the
+# local proxy that adds its token. Everything else is switched off.
+
+toolsets:
+  bash:
+    enabled: false
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  kubernetes/live-metrics:
+    enabled: false
+  internet:
+    enabled: false
+
+mcp_servers:
+  sre-tools:
+    description: >-
+      Read-only Kubernetes tools for the demo namespace (upstream Kubernetes
+      MCP server), through the AgentCore gateway. Always pass namespace "demo".
+    config:
+      url: "http://127.0.0.1:8100/mcp"
+      mode: streamable-http
+    # Agent-side allowlist. The gateway's Cedar policies and Kubernetes RBAC
+    # enforce the real limits; tools appear prefixed with the target name.
+    allowed_tools:
+      - k8s-mcp___events_list
+      - k8s-mcp___pods_list_in_namespace
+      - k8s-mcp___pods_get
+      - k8s-mcp___pods_log
+      - k8s-mcp___resources_get
+      - k8s-mcp___resources_list

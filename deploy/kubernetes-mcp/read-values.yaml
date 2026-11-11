@@ -1,0 +1,51 @@
+# Upstream Kubernetes MCP server, read-only, behind the AgentCore Gateway.
+# Its tools reach the cluster as ServiceAccount mcp/k8s-mcp-read, limited by
+# deploy/kubernetes-mcp/rbac.yaml to the demo namespace.
+fullnameOverride: kubernetes-mcp-read
+
+serviceAccount:
+  create: true
+  name: k8s-mcp-read
+  automountToken: true
+
+rbac:
+  create: false
+
+ingress:
+  enabled: false
+
+httpRoute:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 8080
+
+image:
+  registry: quay.io
+  repository: containers/kubernetes_mcp_server
+  version: v0.1.2
+  pullPolicy: IfNotPresent
+
+config:
+  port: "8080"
+  bind_address: "0.0.0.0"
+  toolsets:
+    - core
+  enabled_tools:
+    - events_list
+    - pods_get
+    - pods_list_in_namespace
+    - pods_log
+    - resources_get
+    - resources_list
+  read_only: true
+  stateless: true # behind the AgentCore Gateway: no change notifications needed
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

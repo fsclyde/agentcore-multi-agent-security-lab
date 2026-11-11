@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars (ignored by Git) and fill in.
+
+aws_region = "eu-west-1"
+
+# Your public IP. ./scripts/configure.sh fills this in.
+admin_cidr = "203.0.113.10/32"
+
+# A Bedrock model or inference profile enabled in your account and region.
+model_id = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+# Step 4: false. Step 6 (after the images are pushed): true.
+deploy_agents = false
+
+# Step 6: LOG_ONLY. Step 8: ENFORCE.
+policy_mode = "LOG_ONLY"
+
+# A public Route 53 hosted zone in this account, for the Kubernetes MCP
+# server's TLS certificate. ./scripts/configure.sh fills this in.
+mcp_domain = "lab.example.com"

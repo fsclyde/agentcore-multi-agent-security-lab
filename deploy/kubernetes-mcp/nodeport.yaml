@@ -1,0 +1,18 @@
+# Exposes the MCP server on every node at port 30080, for the internal ALB
+# (infra/k8s_mcp.tf). Only the ALB's security group may reach this port, and
+# the ALB only forwards /mcp, only from the AgentCore Gateway (VPC Lattice).
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-mcp-read-alb
+  namespace: mcp
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: kubernetes-mcp-server
+    app.kubernetes.io/instance: kubernetes-mcp-read
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30080
