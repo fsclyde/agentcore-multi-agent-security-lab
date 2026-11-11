@@ -1,0 +1,25 @@
+# HolmesGPT chart values for the Kubernetes MCP integration.
+# Replace the endpoint placeholder with the MCP endpoint for the configured
+# AgentCore Gateway. Keep credentials in a Kubernetes Secret or secret manager.
+toolsets:
+  kubernetes/core:
+    enabled: false
+  kubernetes/logs:
+    enabled: false
+  bash:
+    enabled: false
+
+mcp_servers:
+  agentcore_kubernetes:
+    description: Read-only access to the demo namespace through AgentCore Gateway
+    config:
+      url: https://<AGENTCORE_GATEWAY_MCP_ENDPOINT>
+      mode: streamable-http
+    allowed_tools:
+      - events_list
+      - pods_get
+      - pods_list
+      - pods_list_in_namespace
+      - pods_log
+      - resources_get
+      - resources_list
