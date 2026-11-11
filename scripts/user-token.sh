@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Print a 15-minute access token for alice or bob.
+# Print a 5-minute access token for alice, bob or carol.
 # Usage: TOKEN=$(./scripts/user-token.sh alice)
 set -euo pipefail
 
