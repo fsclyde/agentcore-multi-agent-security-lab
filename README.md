@@ -16,7 +16,11 @@ A bad image tag breaks `demo-web` on a small EKS cluster. Someone has also hidde
 4. **carol**, a second `sre-admin`, approves exactly that change as `CHG-1001`.
 5. bob asks again with `CHG-1001`. The **operator agent** changes one image in one Deployment. Kubernetes records that `agent:operator` did it for bob, and that carol approved it.
 
-![How a fix reaches the cluster](docs/overview.png)
+## Architecture
+
+![Architecture: AgentCore Runtime, Gateway, targets and EKS](docs/architecture.png)
+
+Three agents run in **AgentCore Runtime** inside the VPC. They reach the cluster only through **AgentCore Gateway**, where each tool call passes ① the interceptor (person and approval), ② Cedar, ③ the tool, and ④ the guardrail on the result. Reads go privately through VPC Lattice to the Kubernetes MCP server; the one write is a Lambda that impersonates `agent:operator`. Sources: [architecture.drawio](docs/architecture.drawio). A simpler, story-only picture: [overview.png](docs/overview.png).
 
 ## The four questions
 

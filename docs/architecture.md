@@ -22,7 +22,7 @@ flowchart LR
     W -->|impersonate agent:operator<br/>for the person, with change ID and approver| K
 ```
 
-The three agents run inside the VPC and reach AWS only through VPC endpoints. The picture in the README is [docs/overview.drawio](overview.drawio); open it in draw.io to change it.
+The three agents run inside the VPC and reach AWS only through VPC endpoints. The README's diagram is [architecture.drawio](architecture.drawio) (AWS icons) and the story picture is [overview.drawio](overview.drawio); open either in draw.io to change it.
 
 ## Controls, by the gateway's four questions
 
@@ -104,5 +104,5 @@ deploy/      Kubernetes MCP server: Helm values, RBAC, NodePort and NetworkPolic
 agents/      triage, holmes and operator containers (ARM64), plus shared code in common/
 manifests/   demo app and Kubernetes RBAC
 scripts/     state bucket, build and push, users, tokens, approvals, demo, checks, teardown
-docs/        overview picture, architecture, setup guide, glossary, Kubernetes MCP notes, known gaps
+docs/        diagrams (.drawio + .png), architecture, setup guide, glossary, Kubernetes MCP notes, known gaps
 ```
