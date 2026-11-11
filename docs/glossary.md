@@ -14,10 +14,10 @@ The words this lab uses, in one line each.
 | **MCP** | Model Context Protocol: the standard way an agent lists and calls tools. The gateway speaks MCP to the agents. |
 | **Kubernetes MCP server** | An open-source MCP server that exposes Kubernetes reads (pods, events, logs) as tools. Here it is read-only and limited to one namespace. |
 | **HolmesGPT** | An open-source AI agent for investigating Kubernetes incidents. Here it can only read, and only through the gateway. |
-| **Amazon Cognito** | Where the people (alice, bob, carol) log in. Their group, `sre-viewer` or `sre-admin`, is in their token. |
+| **Amazon Cognito** | Where the people (nadia, marco, priya) log in. Their group, `sre-viewer` or `sre-admin`, is in their token. |
 | **On behalf of** | Every tool call carries two identities: the agent (its IAM role) and the person it works for (their Cognito token). |
 | **SigV4** | AWS request signing. Each agent signs gateway calls with its own IAM role, so no agent needs a secret. |
-| **Four eyes** | A change needs a second person: carol approves bob's change before it can run. |
+| **Four eyes** | A change needs a second person: priya approves marco's change before it can run. |
 | **Change ID** | The name of one approved change, such as `CHG-1001`. The approval is valid for that exact change, once, for 30 minutes at most. |
 | **Impersonation** | A Kubernetes feature: the write Lambda acts as `agent:operator` and attaches the person, so the audit log names both. |
 | **VPC Lattice** | AWS private networking between services. The gateway reaches the MCP server through it, never through the internet. |

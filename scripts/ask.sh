@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Send a request to the triage agent as alice or bob.
-# Usage: ./scripts/ask.sh bob "Investigate demo-web in namespace demo"
+# Send a request to the triage agent as nadia or marco.
+# Usage: ./scripts/ask.sh marco "Investigate demo-web in namespace demo"
 set -euo pipefail
 
 user="$1"; prompt="$2"

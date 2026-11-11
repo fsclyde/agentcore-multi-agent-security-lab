@@ -6,7 +6,7 @@ Read the [README](../README.md) first: it tells the story with a simpler picture
 
 ```mermaid
 flowchart LR
-    P[Person: alice, bob or carol] -->|Cognito token| T[Triage agent<br/>Runtime, HTTP]
+    P[Person: nadia, marco or priya] -->|Cognito token| T[Triage agent<br/>Runtime, HTTP]
     T -->|A2A + person's token<br/>viewer or admin| H[HolmesGPT<br/>Runtime, A2A]
     T -->|A2A + person's token<br/>admin only| O[Operator agent<br/>Runtime, A2A]
     H -->|SigV4 as holmes role<br/>+ person's token| G
@@ -70,30 +70,30 @@ The three agents run inside the VPC and reach AWS only through VPC endpoints. Th
 
 ```mermaid
 sequenceDiagram
-    actor bob
-    actor carol
+    actor marco
+    actor priya
     participant T as Triage agent
     participant O as Operator agent
     participant G as Gateway interceptor
     participant C as Cedar
     participant W as Write Lambda
     participant K as Kubernetes
-    bob->>T: apply the fix
-    T->>O: A2A, with bob's token
+    marco->>T: apply the fix
+    T->>O: A2A, with marco's token
     O->>G: update_deployment_image (no change ID)
     G-->>O: refused: a change_id is required
-    O-->>bob: an approval is needed
-    carol->>G: approve.sh CHG-1001 (stored in SSM with carol's token)
-    bob->>T: apply change CHG-1001
-    T->>O: A2A, with bob's token
+    O-->>marco: an approval is needed
+    priya->>G: approve.sh CHG-1001 (stored in SSM with priya's token)
+    marco->>T: apply change CHG-1001
+    T->>O: A2A, with marco's token
     O->>G: update_deployment_image, change_id CHG-1001
-    G->>G: bob's token valid, session live, CHG-1001 by another admin, matches exactly
+    G->>G: marco's token valid, session live, CHG-1001 by another admin, matches exactly
     G->>G: delete the approval (single use), add agent, person, approver
     G->>C: allowed?
     C-->>G: permit
     G->>W: run
-    W->>K: patch as agent:operator for bob, CHG-1001, approved by carol
-    K-->>bob: demo-web healthy, rollout history and audit log name both people
+    W->>K: patch as agent:operator for marco, CHG-1001, approved by priya
+    K-->>marco: demo-web healthy, rollout history and audit log name both people
 ```
 
 ## Repository layout

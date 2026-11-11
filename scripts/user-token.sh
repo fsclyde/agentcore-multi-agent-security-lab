@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Print a 5-minute access token for alice, bob or carol.
-# Usage: TOKEN=$(./scripts/user-token.sh alice)
+# Print a 5-minute access token for nadia, marco or priya.
+# Usage: TOKEN=$(./scripts/user-token.sh nadia)
 set -euo pipefail
 
 user="$1"
