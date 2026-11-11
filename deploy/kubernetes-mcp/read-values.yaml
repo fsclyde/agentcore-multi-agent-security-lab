@@ -29,9 +29,14 @@ config:
   bind_address: "0.0.0.0"
   toolsets:
     - core
+  enabled_tools:
+    - events_list
+    - pods_get
+    - pods_list_in_namespace
+    - pods_log
+    - resources_get
+    - resources_list
   read_only: true
-  disabled_tools:
-    - configuration_view
 
 resources:
   requests:
